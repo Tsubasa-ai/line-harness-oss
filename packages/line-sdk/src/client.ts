@@ -18,6 +18,11 @@ export interface FollowersInsight {
   blocks?: number;
 }
 
+export interface FollowerIds {
+  userIds: string[];
+  next?: string;
+}
+
 export class LineClient {
   constructor(private readonly channelAccessToken: string) {}
 
@@ -281,5 +286,25 @@ export class LineClient {
       `/v2/bot/insight/followers?date=${encodeURIComponent(date)}`,
     );
     return data as FollowersInsight;
+  }
+
+  /**
+   * Get the LINE user IDs of everyone following this Official Account.
+   * GET only — no messages are sent.
+   *
+   * Verified/premium accounts only; unverified accounts get 403.
+   * Returns up to 300 ids per call — pass `next` back as `continuationToken`
+   * until the response omits it.
+   *
+   * Users who blocked the account are not returned.
+   */
+  async getFollowerIds(continuationToken?: string): Promise<FollowerIds> {
+    const params = new URLSearchParams({ limit: '300' });
+    if (continuationToken) params.set('start', continuationToken);
+    const { data } = await this.request(
+      'GET',
+      `/v2/bot/followers/ids?${params.toString()}`,
+    );
+    return data as FollowerIds;
   }
 }
