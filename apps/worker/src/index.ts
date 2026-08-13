@@ -27,6 +27,7 @@ import { processDueMeetConsultationReminders } from './services/meet-consultatio
 import { runEventBookingExpirer } from './services/event-booking-expirer.js';
 import { sendEventBookingNotification } from './services/event-booking-notifier.js';
 import { sendBookingNotification } from './services/booking-notifier.js';
+import { purgeExpiredWebhookEvents } from './services/webhook-event-dedup.js';
 import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
 import { authMiddleware } from './middleware/auth.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
@@ -1065,6 +1066,13 @@ async function scheduled(
       );
     } catch (e) {
       console.error('booking-expirer error:', e);
+    }
+
+    try {
+      const purged = await purgeExpiredWebhookEvents(env.DB, new Date());
+      console.log(`[webhook-event-dedup] purged=${purged}`);
+    } catch (e) {
+      console.error('webhook-event-dedup purge error:', e);
     }
   }
 

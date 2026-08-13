@@ -1070,6 +1070,17 @@ CREATE TABLE IF NOT EXISTS booking_idempotency_keys (
 CREATE INDEX IF NOT EXISTS idx_idempotency_expires ON booking_idempotency_keys (expires_at);
 
 -- ============================================================
+-- webhook_event_dedup: LINE webhook 再送による二重処理防止 (migration 067)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS webhook_event_dedup (
+  webhook_event_id TEXT PRIMARY KEY,
+  event_type       TEXT NOT NULL,
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  expires_at       TEXT NOT NULL                  -- UTC ISO8601
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_event_dedup_expires ON webhook_event_dedup (expires_at);
+
+-- ============================================================
 -- booking_reminders: 前日 / 当日 N 時間前リマインダ
 -- ============================================================
 CREATE TABLE IF NOT EXISTS booking_reminders (

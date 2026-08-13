@@ -21,6 +21,12 @@ import { buildMessage } from '../services/step-delivery.js';
 import { pushImmediateFirstStep } from '../services/immediate-first-step.js';
 import type { Env } from '../index.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
+import { claimWebhookEvent } from '../services/webhook-event-dedup.js';
+
+// LINE retries an unacknowledged webhook event with the same webhookEventId.
+// 24h covers LINE's retry window with plenty of margin; stale rows are
+// purged on the 6h cron tick (see index.ts).
+const WEBHOOK_EVENT_DEDUP_TTL_MINUTES = 24 * 60;
 
 const webhook = new Hono<Env>();
 
@@ -127,7 +133,15 @@ webhook.post('/webhook', async (c) => {
     }
   }
 
-  if (!valid) {
+  // Fall through to the per-account scan whenever matchedAccountId is still
+  // unresolved — not only when the fast path's own verification failed.
+  // The fast path can verify successfully via envSecret yet find no
+  // line_accounts row whose channel_secret textually equals it (e.g. the DB
+  // row drifted out of sync with the Cloudflare secret). Without this, the
+  // send still succeeds on the env-default token but line_account_id stays
+  // NULL forever — invisible to the admin dashboard, which filters by
+  // line_account_id (observed 2026-08-13: 5 new AOプロ friends).
+  if (!valid || !matchedAccountId) {
     const accounts = await getLineAccounts(db);
     for (const account of accounts) {
       if (!account.is_active) continue;
@@ -139,6 +153,11 @@ webhook.post('/webhook', async (c) => {
         valid = true;
         break;
       }
+    }
+    if (valid && !matchedAccountId) {
+      console.error(
+        '[webhook] signature verified via env default LINE_CHANNEL_SECRET but no active line_accounts row matches it — line_account_id will be NULL for this event. Check for drift between the Cloudflare secret and the line_accounts.channel_secret column.',
+      );
     }
   }
 
@@ -183,6 +202,20 @@ async function handleEvent(
   liffUrl?: string,
   r2?: R2Bucket,
 ): Promise<void> {
+  // LINE may redeliver the same event (webhookEventId unchanged) when our
+  // response wasn't received in time. Skip processing entirely on a repeat
+  // so scenario enrollment, mileage, and auto-replies never double-fire.
+  const isFirstDelivery = await claimWebhookEvent(db, {
+    webhookEventId: event.webhookEventId,
+    eventType: event.type,
+    ttlMinutes: WEBHOOK_EVENT_DEDUP_TTL_MINUTES,
+    now: new Date(),
+  });
+  if (!isFirstDelivery) {
+    console.log(`[webhook] duplicate webhookEventId=${event.webhookEventId} type=${event.type}, skipping`);
+    return;
+  }
+
   if (event.type === 'follow') {
     const userId =
       event.source.type === 'user' ? event.source.userId : undefined;
