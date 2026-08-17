@@ -1010,6 +1010,13 @@ CREATE TABLE users (
   updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours'))
 );
 
+CREATE TABLE webhook_event_dedup (
+  webhook_event_id TEXT PRIMARY KEY,
+  event_type       TEXT NOT NULL,
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
+  expires_at       TEXT NOT NULL                  -- UTC ISO8601
+);
+
 CREATE TABLE webinar_comments (
   id TEXT PRIMARY KEY,
   webinar_id TEXT NOT NULL REFERENCES webinars(id) ON DELETE CASCADE,
@@ -1379,6 +1386,8 @@ CREATE INDEX idx_users_email ON users (email);
 CREATE INDEX idx_users_external_id ON users (external_id);
 
 CREATE INDEX idx_users_phone ON users (phone);
+
+CREATE INDEX idx_webhook_event_dedup_expires ON webhook_event_dedup (expires_at);
 
 CREATE INDEX idx_webinar_comments_webinar
   ON webinar_comments (webinar_id, at_seconds);
