@@ -212,7 +212,7 @@ describe('POST /webhook — postback events', () => {
 
     const stmt = {
       bind: vi.fn(),
-      run: vi.fn().mockResolvedValue({}),
+      run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       all: vi.fn().mockResolvedValue({ results: [] }), // no auto_reply match
     };
     stmt.bind.mockReturnValue(stmt);
@@ -294,7 +294,7 @@ describe('POST /webhook — postback events', () => {
 
     const stmt = {
       bind: vi.fn(),
-      run: vi.fn().mockResolvedValue({}),
+      run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       all: vi.fn().mockResolvedValue({
         results: [
           {
@@ -406,7 +406,7 @@ describe('POST /webhook — first-contact existing friends', () => {
 
     const stmt = {
       bind: vi.fn(),
-      run: vi.fn().mockResolvedValue({}),
+      run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       all: vi.fn().mockResolvedValue({ results: [] }),
     };
     stmt.bind.mockReturnValue(stmt);
