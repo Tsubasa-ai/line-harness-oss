@@ -539,6 +539,38 @@ CREATE TABLE link_clicks (
   clicked_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE media_inquiries (
+  id TEXT PRIMARY KEY,
+  inquiry_type TEXT NOT NULL,
+  company_name TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  department TEXT,
+  position TEXT,
+  decision_role TEXT,
+  email TEXT NOT NULL,
+  phone TEXT,
+  company_size TEXT,
+  current_tools TEXT,
+  line_friend_count TEXT,
+  budget TEXT,
+  timeframe TEXT,
+  challenge TEXT NOT NULL,
+  desired_outcome TEXT,
+  preferred_contact TEXT,
+  source_article TEXT,
+  source_url TEXT,
+  referrer TEXT,
+  utm_source TEXT,
+  utm_medium TEXT,
+  utm_campaign TEXT,
+  country TEXT,
+  cf_ray TEXT,
+  mail_status TEXT NOT NULL DEFAULT 'pending',
+  mail_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE meet_consultation_reminders (
   id               TEXT PRIMARY KEY,
   consultation_id  TEXT NOT NULL REFERENCES meet_consultations (id) ON DELETE CASCADE,
@@ -775,6 +807,7 @@ CREATE TABLE rich_menu_groups (
   size               TEXT NOT NULL CHECK (size IN ('large','compact')),
   default_page_id    TEXT,
   is_default_for_all INTEGER NOT NULL DEFAULT 0,
+  selected           INTEGER NOT NULL DEFAULT 0,
   status             TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published')),
   publishing_at      TEXT,
   created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')),
@@ -1245,6 +1278,12 @@ CREATE INDEX idx_link_clicks_friend ON link_clicks (friend_id);
 
 CREATE INDEX idx_link_clicks_link ON link_clicks (tracked_link_id);
 
+CREATE INDEX idx_media_inquiries_created
+  ON media_inquiries (created_at DESC);
+
+CREATE INDEX idx_media_inquiries_mail_status
+  ON media_inquiries (mail_status, created_at);
+
 CREATE INDEX idx_meet_consultation_reminders_due
   ON meet_consultation_reminders (status, scheduled_at);
 
@@ -1379,3 +1418,6 @@ CREATE INDEX idx_webinar_viewers_webinar
 CREATE UNIQUE INDEX uq_google_calendar_connections_active_staff
   ON google_calendar_connections (staff_id)
   WHERE staff_id IS NOT NULL AND is_active = 1;
+
+INSERT INTO auto_replies (id, keyword, match_type, response_type, response_content, template_id, line_account_id, is_active, created_at)
+VALUES ('builtin-mileage-wallet-keyword', 'マイル', 'exact', 'flex', '{"type":"bubble","size":"kilo","body":{"type":"box","layout":"vertical","paddingAll":"20px","contents":[{"type":"text","text":"あなたのHarnessマイル","weight":"bold","size":"lg","color":"#1e293b"},{"type":"text","text":"現在のマイル、獲得履歴、登録済みアカウント、次にマイルを獲得できる行動を確認できます。","wrap":true,"size":"sm","color":"#64748b","margin":"md"}]},"footer":{"type":"box","layout":"vertical","paddingAll":"16px","contents":[{"type":"button","style":"primary","color":"#06C755","height":"sm","action":{"type":"uri","label":"マイルを確認する","uri":"https://liff.line.me/{{liff_id}}/?page=affiliate&liffId={{liff_id}}"}}]}}', NULL, NULL, 1, '2026-08-11T00:00:00.000+09:00');
