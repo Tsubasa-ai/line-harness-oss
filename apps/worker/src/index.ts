@@ -87,6 +87,7 @@ import { webinarRoutes } from './routes/webinars.js';
 import { instagramEngagement } from './routes/instagram-engagement.js';
 import adminVersion from './routes/admin-version.js';
 import adminUpdate from './routes/admin-update.js';
+import { mediaInquiries } from './routes/media-inquiries.js';
 import { isLinkPreviewBot } from './lib/og-bot.js';
 import { buildOgHtml } from './lib/og-html.js';
 import {
@@ -136,6 +137,10 @@ export type Env = {
     // Calendar owners only enter/share their Google Calendar ID in admin UI.
     GOOGLE_SERVICE_ACCOUNT_EMAIL?: string;
     GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?: string;
+    // Keyless Google Calendar connection. User grants access once via OAuth;
+    // the Worker keeps a refresh token and never needs a service-account key.
+    GOOGLE_OAUTH_CLIENT_ID?: string;
+    GOOGLE_OAUTH_CLIENT_SECRET?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -143,6 +148,21 @@ export type Env = {
 };
 
 const app = new Hono<Env>();
+
+// Public form endpoint used by the-harness.com. Keep this allowlist separate
+// from credentialed admin CORS so the media origin gains access to this route
+// only, never to the admin API surface.
+app.use('/api/public/media-inquiries', cors({
+  origin: (origin) => [
+    'https://the-harness.com',
+    'https://www.the-harness.com',
+    'http://localhost:4321',
+    'http://127.0.0.1:4321',
+  ].includes(origin) ? origin : '',
+  allowMethods: ['POST', 'OPTIONS'],
+  allowHeaders: ['Content-Type'],
+  maxAge: 600,
+}));
 
 // CORS — credentialed cookie auth cannot use a wildcard origin. Reflect only
 // same-origin requests and origins on the ADMIN_ORIGIN allowlist; everything
@@ -179,6 +199,7 @@ app.route('/', inbox);
 app.route('/', openapi);
 app.route('/', liffRoutes);
 app.route('/', affiliateSelfRoutes);
+app.route('/', mediaInquiries);
 
 // Mount route groups — Round 3
 app.route('/', webhooks);
