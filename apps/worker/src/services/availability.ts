@@ -6,7 +6,7 @@
 import type { AvailabilityByStaff } from './booking-types.js';
 import { SLOT_GRANULARITY_MINUTES } from './booking-types.js';
 import { getStaffGoogleBusy } from './booking-calendar-sync.js';
-import type { GoogleServiceAccountCredentials } from './google-service-account.js';
+import type { GoogleCalendarCredentials } from './google-oauth.js';
 
 export interface Interval {
   start: string; // HH:MM
@@ -100,7 +100,7 @@ export interface GetAvailabilityParams {
   to: string;
   now: Date;
   minLeadTimeMinutes: number;
-  googleCredentials?: GoogleServiceAccountCredentials;
+  googleCredentials?: GoogleCalendarCredentials;
 }
 
 export interface CalendarSyncState {

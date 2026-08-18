@@ -70,7 +70,10 @@
     "063_webinar_instagram_mileage.sql",
     "064_async_mileage_and_tag_policy.sql",
     "065_following_loyalty_mileage.sql",
-    "066_referral_quality_mileage.sql"
+    "066_referral_quality_mileage.sql",
+    "067_mileage_keyword_auto_reply.sql",
+    "068_media_inquiries.sql",
+    "069_rich_menu_selected.sql"
   ],
-  "migrationCount": 71
+  "migrationCount": 74
 }
