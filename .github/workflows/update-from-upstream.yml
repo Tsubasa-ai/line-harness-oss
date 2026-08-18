@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
 
 jobs:
   update:
@@ -50,6 +49,8 @@ jobs:
         if: steps.detect.outputs.has_changes == 'true'
         run: |
           git merge --no-edit upstream/main
+          git checkout HEAD -- .github/workflows/ 2>/dev/null || true
+          git diff --quiet -- .github/workflows/ || { git add .github/workflows/; git commit --amend --no-edit; }
 
       - name: Push update branch
         if: steps.detect.outputs.has_changes == 'true'
