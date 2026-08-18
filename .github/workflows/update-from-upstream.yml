@@ -64,11 +64,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr create \
-            --base main \
-            --head "${{ steps.branch.outputs.name }}" \
-            --title "chore: update from upstream" \
-            --body "This PR imports the latest Shudesu/line-harness-oss main into this fork.\n\nMerge this PR to receive upstream fixes and features, then let the existing Cloudflare deploy workflows update your environment."
+          gh api repos/${{ github.repository }}/pulls \
+            -f title="chore: update from upstream" \
+            -f head="${{ steps.branch.outputs.name }}" \
+            -f base="main" \
+            -f body="This PR imports the latest Shudesu/line-harness-oss main into this fork. Merge this PR to receive upstream fixes and features, then let the existing Cloudflare deploy workflows update your environment."
 
       - name: No upstream changes
         if: steps.detect.outputs.has_changes == 'false'
