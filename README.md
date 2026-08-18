@@ -1,6 +1,10 @@
 🌐 **日本語** | [English](README.en.md) | [简体中文](README.zh-CN.md) | [한국어](README.ko.md) | [Español](README.es.md)
 
-# LINE Harness
+# L Harness
+
+> **名称について:** 2026年8月19日から製品表示名を「L Harness」に統一しました。
+> 既存導入を壊さないため、リポジトリURL、`create-line-harness`、
+> `@line-harness/*`は互換識別子として維持します。詳細は[BRAND.md](BRAND.md)。
 
 > ### **[LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)** 👈
 
@@ -9,15 +13,15 @@ Cloudflare 無料枠で動く。サーバー代 **0 円**。Claude Code から�
 
 ### ▶️ [動画で見る (YouTube・約20分)](https://youtu.be/DiRuGaeq1sM)
 
-[![クリックで YouTube を再生 — LINE Harness 導入の全手順](https://img.youtube.com/vi/DiRuGaeq1sM/maxresdefault.jpg)](https://youtu.be/DiRuGaeq1sM)
+[![クリックで YouTube を再生 — L Harness 導入の全手順](https://img.youtube.com/vi/DiRuGaeq1sM/maxresdefault.jpg)](https://youtu.be/DiRuGaeq1sM)
 
-**現バージョン**: v0.14.1 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
+**現バージョン**: v0.21.0 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
 
 ---
 
-## なぜ LINE Harness？
+## なぜ L Harness？
 
-| | L社 | U社 | **LINE Harness** |
+| | L社 | U社 | **L Harness** |
 |---|---|---|---|
 | 月額 | 2万円〜 | 1万円〜 | **0円** |
 | ステップ配信 | ✅ | ✅ | ✅ |
@@ -82,6 +86,7 @@ CLI が以下を全部やる:
 - **リッチメニュー** — ユーザー別 / タグ別の自動切替
 - **フォーム (LIFF)** — LINE 内完結フォーム、回答 → メタデータ自動保存
 - **カレンダー予約** — Google Calendar 連携の予約システム (LIFF)
+- **ライブCTA即時予約** — ウェビナーのフォーム送信後、その場で空き日時を選び、Google Meet発行・LINEリマインドまで自動化
 - **スタッフ管理** — Owner / Admin / Staff の 3 ロール、API key 個別発行
 
 ### アフィリエイト計測（ASP）
@@ -145,6 +150,7 @@ CLI が以下を全部やる:
 
 - [セットアップガイド (動画)](https://youtu.be/DiRuGaeq1sM)
 - [LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)
+- [Googleカレンダー連携とライブCTA即時予約](docs/wiki/28-Google-Calendar-and-Webinar-Booking.md)
 - [npm: @line-harness/sdk](https://www.npmjs.com/package/@line-harness/sdk)
 - [npm: @line-harness/mcp-server](https://www.npmjs.com/package/@line-harness/mcp-server)
 - [npm: create-line-harness](https://www.npmjs.com/package/create-line-harness)
@@ -165,7 +171,7 @@ Issue / PR 歓迎。OSS リポへの PR は `Shudesu/line-harness-oss` (この�
 
 ## 開発者 / Author
 
-**野田修一（Shudesu）** — Harness シリーズ（LINE Harness / IG Harness / X Harness）開発者、AIエージェント株式会社 代表
+**野田修一（Shudesu）** — Harness シリーズ（L Harness / IG Harness / X Harness）開発者、AIエージェント株式会社 代表
 
 - GitHub: [@Shudesu](https://github.com/Shudesu)
 - X: [@ai_shunoda](https://x.com/ai_shunoda)
@@ -175,4 +181,4 @@ Issue / PR 歓迎。OSS リポへの PR は `Shudesu/line-harness-oss` (この�
 
 ---
 
-> **LINE Harness** by [@Shudesu](https://github.com/Shudesu) — AI ネイティブ時代の OSS LINE CRM
+> **L Harness** by [@Shudesu](https://github.com/Shudesu) — AI ネイティブ時代の OSS LINE CRM
