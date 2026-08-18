@@ -11,7 +11,7 @@ Cloudflare 無料枠で動く。サーバー代 **0 円**。Claude Code から�
 
 [![クリックで YouTube を再生 — LINE Harness 導入の全手順](https://img.youtube.com/vi/DiRuGaeq1sM/maxresdefault.jpg)](https://youtu.be/DiRuGaeq1sM)
 
-**現バージョン**: v0.14.1 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
+**現バージョン**: v0.21.0 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
 
 ---
 
@@ -82,6 +82,7 @@ CLI が以下を全部やる:
 - **リッチメニュー** — ユーザー別 / タグ別の自動切替
 - **フォーム (LIFF)** — LINE 内完結フォーム、回答 → メタデータ自動保存
 - **カレンダー予約** — Google Calendar 連携の予約システム (LIFF)
+- **ライブCTA即時予約** — ウェビナーのフォーム送信後、その場で空き日時を選び、Google Meet発行・LINEリマインドまで自動化
 - **スタッフ管理** — Owner / Admin / Staff の 3 ロール、API key 個別発行
 
 ### アフィリエイト計測（ASP）
@@ -145,6 +146,7 @@ CLI が以下を全部やる:
 
 - [セットアップガイド (動画)](https://youtu.be/DiRuGaeq1sM)
 - [LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)
+- [Googleカレンダー連携とライブCTA即時予約](docs/wiki/28-Google-Calendar-and-Webinar-Booking.md)
 - [npm: @line-harness/sdk](https://www.npmjs.com/package/@line-harness/sdk)
 - [npm: @line-harness/mcp-server](https://www.npmjs.com/package/@line-harness/mcp-server)
 - [npm: create-line-harness](https://www.npmjs.com/package/create-line-harness)
