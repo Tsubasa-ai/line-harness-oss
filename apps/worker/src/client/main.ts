@@ -1,5 +1,5 @@
 /**
- * LINE Harness LIFF — The single entry point
+ * L Harness LIFF — The single entry point
  *
  * This URL IS the friend-add URL. Every user enters through here.
  *
