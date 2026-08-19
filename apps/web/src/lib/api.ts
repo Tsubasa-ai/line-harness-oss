@@ -1253,6 +1253,7 @@ export const api = {
         size: 'large' | 'compact';
         defaultPageId: string | null;
         isDefaultForAll: boolean;
+        selected: boolean;
         status: 'draft' | 'published';
         publishingAt: string | null;
         thumbnailR2Key: string | null;
@@ -1269,6 +1270,7 @@ export const api = {
         size: 'large' | 'compact';
         defaultPageId: string | null;
         isDefaultForAll: boolean;
+        selected: boolean;
         status: 'draft' | 'published';
         publishingAt: string | null;
         createdAt: string;
@@ -1298,6 +1300,7 @@ export const api = {
       name: string;
       chatBarText: string;
       size: 'large' | 'compact';
+      selected: boolean;
       pages: Array<{
         id?: string;
         name: string;
@@ -1321,6 +1324,7 @@ export const api = {
       name?: string;
       chatBarText?: string;
       isDefaultForAll?: boolean;
+      selected?: boolean;
       pages?: Array<{
         id?: string;
         name: string;
@@ -1365,6 +1369,7 @@ export const api = {
           richMenuId: string;
           name: string;
           chatBarText: string;
+          selected: boolean;
           size: { width: number; height: number };
           areasCount: number;
           isCurrentDefault: boolean;
@@ -1693,6 +1698,7 @@ export interface BookingRequest {
   menu_name: string;
   staff_name: string;
   friend_name: string | null;
+  requested_at: string;
 }
 
 export interface BookingAvailabilityRule {
@@ -1819,7 +1825,13 @@ export const bookingApi = {
     fetchApi<{
       connection: BookingGoogleCalendarConnection | null;
       service_account: { configured: boolean; email: string | null };
+      oauth: { configured: boolean };
     }>(withAccount(`/api/booking/admin/staff/${staffId}/google-calendar`, accountId)),
+  startGoogleCalendarOAuth: (accountId: string, staffId: string) =>
+    fetchApi<{ authorization_url: string }>(
+      withAccount(`/api/booking/admin/staff/${staffId}/google-calendar/oauth/start`, accountId),
+      { method: 'POST' },
+    ),
   putGoogleCalendar: (accountId: string, staffId: string, calendarId: string) =>
     fetchApi<{ ok: true; calendar_id: string; last_verified_at: string }>(
       withAccount(`/api/booking/admin/staff/${staffId}/google-calendar`, accountId),
@@ -2087,7 +2099,9 @@ export type WebinarAnalytics = {
     sessions: number
     firstJoinedAt: string
     latestJoinedAt: string
-    maxWatchedSeconds: number
+    latestWatchedSeconds?: number
+    /** 旧Worker/旧管理画面とのローリングデプロイ互換。 */
+    maxWatchedSeconds?: number
     ctaClickedAt: string | null
     registered: boolean
     formSubmittedAt: string | null

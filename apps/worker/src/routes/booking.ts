@@ -13,6 +13,7 @@
 import { Hono, type Context } from 'hono';
 import { getLineAccounts } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { resolveCorsOrigin } from '../middleware/admin-auth-config.js';
 import { canTransition, nextStatus, type BookingAction } from '../services/booking-state.js';
 import { getAvailability } from '../services/availability.js';
 import {
@@ -33,14 +34,46 @@ import {
   type BookingStatus,
 } from '../services/booking-types.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
+import { GoogleCalendarClient } from '../services/google-calendar.js';
+import {
+  buildGoogleOAuthAuthorizationUrl,
+  exchangeGoogleOAuthCode,
+  googleOAuthConfigured,
+  revokeGoogleOAuthToken,
+  signGoogleOAuthState,
+  verifyGoogleOAuthState,
+} from '../services/google-oauth.js';
 
 const booking = new Hono<Env>();
+const GOOGLE_OAUTH_CALLBACK_PATH = '/api/booking/google-calendar/oauth/callback';
+const GOOGLE_OAUTH_STATE_TTL_MS = 10 * 60_000;
 
 function googleCredentials(env: Env['Bindings']) {
   return {
     email: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
     privateKey: env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    oauthClientId: env.GOOGLE_OAUTH_CLIENT_ID,
+    oauthClientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
   };
+}
+
+function googleOAuthRedirectUri(requestUrl: string): string {
+  return new URL(GOOGLE_OAUTH_CALLBACK_PATH, requestUrl).toString();
+}
+
+function adminCalendarReturnUrl(
+  env: Env['Bindings'],
+  staffId: string | null,
+  result: 'connected' | 'denied' | 'error',
+  adminOrigin?: string,
+): string {
+  const url = new URL(
+    '/booking/staff/shifts',
+    adminOrigin ?? env.ADMIN_PUBLIC_URL ?? 'https://your-admin.pages.dev',
+  );
+  if (staffId) url.searchParams.set('staff_id', staffId);
+  url.searchParams.set('google', result);
+  return url.toString();
 }
 
 // ----------------------------------------------------------------
@@ -520,7 +553,7 @@ booking.get('/api/liff/booking/me', async (c) => {
          INNER JOIN staff s ON s.id = b.staff_id
         WHERE b.friend_id = ? AND b.line_account_id = ?
           AND (b.status NOT IN ('requested','confirmed') OR b.starts_at < ?)
-        ORDER BY b.starts_at DESC
+        ORDER BY b.requested_at DESC
         LIMIT 50`,
     )
     .bind(friendId, accountId, new Date().toISOString())
@@ -1128,6 +1161,124 @@ booking.put('/api/booking/admin/staff/:id/availability-rules', async (c) => {
   return c.json({ ok: true, count: body.rules.length });
 });
 
+// OAuth start is admin-authenticated and CSRF protected. Only the signed, short-lived
+// state crosses Google's authorization page; API_KEY and client secret never leave Worker.
+booking.post('/api/booking/admin/staff/:id/google-calendar/oauth/start', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const staffId = c.req.param('id');
+  if (!(await assertStaffInAccount(c.env.DB, staffId, accountId))) {
+    return c.json({ error: 'staff_not_found_in_account' }, 404);
+  }
+  const credentials = googleCredentials(c.env);
+  if (!googleOAuthConfigured(credentials)) {
+    return c.json({ error: 'google_oauth_not_configured' }, 503);
+  }
+  const state = await signGoogleOAuthState({
+    accountId,
+    staffId,
+    expiresAt: Date.now() + GOOGLE_OAUTH_STATE_TTL_MS,
+    adminOrigin: (() => {
+      const origin = c.req.header('Origin');
+      return resolveCorsOrigin(c.env, origin, c.req.url) === origin ? origin : undefined;
+    })(),
+  }, c.env.API_KEY);
+  const authorizationUrl = buildGoogleOAuthAuthorizationUrl({
+    clientId: credentials.oauthClientId!,
+    redirectUri: googleOAuthRedirectUri(c.req.url),
+    state,
+  });
+  return c.json({ authorization_url: authorizationUrl });
+});
+
+// Google redirects here without an admin Authorization header. authMiddleware has a narrow
+// GET-only exception for this exact path; signed state binds the callback to staff/account.
+booking.get(GOOGLE_OAUTH_CALLBACK_PATH, async (c) => {
+  let staffId: string | null = null;
+  let adminOrigin: string | undefined;
+  try {
+    const state = c.req.query('state');
+    if (!state) throw new Error('google_oauth_state_missing');
+    const payload = await verifyGoogleOAuthState(state, c.env.API_KEY);
+    staffId = payload.staffId;
+    adminOrigin = payload.adminOrigin;
+    if (c.req.query('error')) {
+      return c.redirect(adminCalendarReturnUrl(c.env, staffId, 'denied', adminOrigin));
+    }
+    const code = c.req.query('code');
+    const credentials = googleCredentials(c.env);
+    if (!code || !googleOAuthConfigured(credentials)) {
+      throw new Error('google_oauth_callback_invalid');
+    }
+    if (!(await assertStaffInAccount(c.env.DB, payload.staffId, payload.accountId))) {
+      throw new Error('google_oauth_staff_invalid');
+    }
+    const token = await exchangeGoogleOAuthCode({
+      code,
+      clientId: credentials.oauthClientId!,
+      clientSecret: credentials.oauthClientSecret!,
+      redirectUri: googleOAuthRedirectUri(c.req.url),
+    });
+
+    // Verify the granted account immediately before persisting the long-lived token.
+    const client = new GoogleCalendarClient({ calendarId: 'primary', accessToken: token.accessToken });
+    const now = new Date();
+    await client.getFreeBusy(now.toISOString(), new Date(now.getTime() + 60_000).toISOString());
+
+    const existing = await c.env.DB
+      .prepare(
+        `SELECT id FROM google_calendar_connections
+          WHERE line_account_id = ? AND staff_id = ? LIMIT 1`,
+      )
+      .bind(payload.accountId, payload.staffId)
+      .first<{ id: string }>();
+    const connectionId = existing?.id ?? crypto.randomUUID();
+    const nowIso = now.toISOString();
+    if (existing) {
+      await c.env.DB
+        .prepare(
+          `UPDATE google_calendar_connections
+              SET calendar_id='primary', auth_type='oauth', access_token=?, refresh_token=?,
+                  api_key=NULL, is_active=1, last_verified_at=?, last_error=NULL, updated_at=?
+            WHERE id=? AND line_account_id=? AND staff_id=?`,
+        )
+        .bind(
+          token.accessToken,
+          token.refreshToken,
+          nowIso,
+          nowIso,
+          connectionId,
+          payload.accountId,
+          payload.staffId,
+        )
+        .run();
+    } else {
+      await c.env.DB
+        .prepare(
+          `INSERT INTO google_calendar_connections
+            (id, calendar_id, line_account_id, staff_id, access_token, refresh_token,
+             auth_type, is_active, last_verified_at, created_at, updated_at)
+           VALUES (?, 'primary', ?, ?, ?, ?, 'oauth', 1, ?, ?, ?)`,
+        )
+        .bind(
+          connectionId,
+          payload.accountId,
+          payload.staffId,
+          token.accessToken,
+          token.refreshToken,
+          nowIso,
+          nowIso,
+          nowIso,
+        )
+        .run();
+    }
+    return c.redirect(adminCalendarReturnUrl(c.env, staffId, 'connected', adminOrigin));
+  } catch (error) {
+    console.error('Google Calendar OAuth callback failed:', error);
+    return c.redirect(adminCalendarReturnUrl(c.env, staffId, 'error', adminOrigin));
+  }
+});
+
 booking.get('/api/booking/admin/staff/:id/google-calendar', async (c) => {
   const accountId = await resolveAccountIdAdmin(c);
   if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
@@ -1151,6 +1302,9 @@ booking.get('/api/booking/admin/staff/:id/google-calendar', async (c) => {
         c.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && c.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
       ),
       email: c.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? null,
+    },
+    oauth: {
+      configured: googleOAuthConfigured(googleCredentials(c.env)),
     },
   });
 });
@@ -1181,6 +1335,7 @@ booking.put('/api/booking/admin/staff/:id/google-calendar', async (c) => {
       calendar_id: calendarId,
       auth_type: 'service_account',
       access_token: null,
+      refresh_token: null,
     }, googleCredentials(c.env));
   } catch (error) {
     console.error('Google Calendar verification failed:', error);
@@ -1193,7 +1348,8 @@ booking.put('/api/booking/admin/staff/:id/google-calendar', async (c) => {
     await c.env.DB
       .prepare(
         `UPDATE google_calendar_connections
-            SET calendar_id = ?, auth_type = 'service_account', is_active = 1,
+            SET calendar_id = ?, auth_type = 'service_account',
+                access_token = NULL, refresh_token = NULL, is_active = 1,
                 last_verified_at = ?, last_error = NULL, updated_at = ?
           WHERE id = ? AND line_account_id = ? AND staff_id = ?`,
       )
@@ -1220,10 +1376,31 @@ booking.delete('/api/booking/admin/staff/:id/google-calendar', async (c) => {
   if (!(await assertStaffInAccount(c.env.DB, staffId, accountId))) {
     return c.json({ error: 'staff_not_found_in_account' }, 404);
   }
+  const connection = await c.env.DB
+    .prepare(
+      `SELECT auth_type, access_token, refresh_token
+         FROM google_calendar_connections
+        WHERE line_account_id = ? AND staff_id = ? AND is_active = 1
+        LIMIT 1`,
+    )
+    .bind(accountId, staffId)
+    .first<{
+      auth_type: string;
+      access_token: string | null;
+      refresh_token: string | null;
+    }>();
+  if (connection?.auth_type === 'oauth') {
+    const token = connection.refresh_token ?? connection.access_token;
+    if (token) {
+      await revokeGoogleOAuthToken(token).catch((error) =>
+        console.error('Google OAuth revoke failed during disconnect:', error));
+    }
+  }
   await c.env.DB
     .prepare(
       `UPDATE google_calendar_connections
-          SET is_active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
+          SET is_active = 0, access_token = NULL, refresh_token = NULL,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now', '+9 hours')
         WHERE line_account_id = ? AND staff_id = ? AND is_active = 1`,
     )
     .bind(accountId, staffId)
@@ -1353,8 +1530,8 @@ booking.get('/api/booking/admin/requests', async (c) => {
          INNER JOIN staff s ON s.id = b.staff_id
          LEFT JOIN friends f ON f.id = b.friend_id
         WHERE b.line_account_id = ?
-        ORDER BY b.starts_at ASC
-        LIMIT 200`
+        ORDER BY b.requested_at DESC
+        LIMIT 500`
     : `SELECT b.*,
               m.name AS menu_name,
               s.display_name AS staff_name,
@@ -1364,8 +1541,8 @@ booking.get('/api/booking/admin/requests', async (c) => {
          INNER JOIN staff s ON s.id = b.staff_id
          LEFT JOIN friends f ON f.id = b.friend_id
         WHERE b.line_account_id = ? AND b.status = ?
-        ORDER BY b.starts_at ASC
-        LIMIT 200`;
+        ORDER BY b.starts_at DESC
+        LIMIT 500`;
   const stmt = c.env.DB.prepare(sql);
   const rows = await (status === 'all' || !status
     ? (status === 'all' ? stmt.bind(accountId) : stmt.bind(accountId, 'requested'))
