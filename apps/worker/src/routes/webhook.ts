@@ -21,6 +21,9 @@ import { buildMessage } from '../services/step-delivery.js';
 import { pushImmediateFirstStep } from '../services/immediate-first-step.js';
 import type { Env } from '../index.js';
 import { awardActivityMileage } from '../services/activity-mileage.js';
+import { replyViaHarnessProxy } from '../services/line-proxy-send.js';
+import type { HarnessProxyDispatch } from '../services/line-proxy-send.js';
+import { dispatchLineProxyLocally } from '../services/local-line-proxy.js';
 
 const webhook = new Hono<Env>();
 
@@ -159,9 +162,21 @@ webhook.post('/webhook', async (c) => {
 
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
+    const proxyDispatch: HarnessProxyDispatch = (request) =>
+      dispatchLineProxyLocally(request, c.env, c.executionCtx);
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, c.env.IMAGES);
+        await handleEvent(
+          db,
+          lineClient,
+          event,
+          channelAccessToken,
+          matchedAccountId,
+          c.env.WORKER_URL || new URL(c.req.url).origin,
+          c.env.LIFF_URL,
+          c.env.IMAGES,
+          proxyDispatch,
+        );
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -182,6 +197,7 @@ async function handleEvent(
   workerUrl?: string,
   liffUrl?: string,
   r2?: R2Bucket,
+  proxyDispatch?: HarnessProxyDispatch,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
@@ -381,7 +397,17 @@ async function handleEvent(
       await matchAndReply(db, lineClient, friend, postbackData, event.replyToken, {
         lineAccountId,
         workerUrl,
+        liffUrl,
         logContext: 'postback',
+        replyMessage: workerUrl
+          ? (token, messages) => replyViaHarnessProxy(
+              workerUrl,
+              lineAccessToken,
+              token,
+              messages,
+              proxyDispatch,
+            )
+          : undefined,
       });
 
     // イベントバス発火: 専用イベント postback_received。
@@ -569,7 +595,20 @@ async function handleEvent(
       friend,
       incomingText,
       event.replyToken,
-      { lineAccountId, workerUrl },
+      {
+        lineAccountId,
+        workerUrl,
+        liffUrl,
+        replyMessage: workerUrl
+          ? (token, messages) => replyViaHarnessProxy(
+              workerUrl,
+              lineAccessToken,
+              token,
+              messages,
+              proxyDispatch,
+            )
+          : undefined,
+      },
     );
 
     // auto_replies にマッチしなかった = 自発メッセージ → unread にする

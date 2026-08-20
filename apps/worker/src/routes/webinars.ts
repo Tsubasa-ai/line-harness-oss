@@ -51,6 +51,11 @@ import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import { resolveSession, parseScheduleRules, upcomingSessions } from '../services/webinar-schedule.js';
 import { sendWebinarRegistrationConfirmation } from '../services/webinar-reminders.js';
 import { dispatchLineProxyLocally } from '../services/local-line-proxy.js';
+import {
+  bookWebinarConsultation,
+  getWebinarConsultationAvailability,
+  WebinarConsultationError,
+} from '../services/webinar-consultation-booking.js';
 import { signWebinarToken, verifyWebinarToken } from '../lib/webinar-token.js';
 import {
   awardWebinarCtaMileage,
@@ -436,24 +441,29 @@ webinarRoutes.post('/api/liff/webinars/:slug/register', async (c) => {
     ) {
       return c.json({ error: 'invalid_session' }, 400);
     }
-    await upsertWebinarRegistration(c.env.DB, webinar.id, auth.friendId, sessionStartAt);
-    const liffMatch = /liff\.line\.me\/([^/?]+)/.exec(c.env.LIFF_URL ?? '');
-    c.executionCtx.waitUntil(
-      sendWebinarRegistrationConfirmation(
-        c.env.DB,
-        webinar,
-        auth.friendId,
-        sessionStartAt,
-        {
-          proxyBaseUrl: new URL(c.req.url).origin,
-          defaultAccessToken: c.env.LINE_CHANNEL_ACCESS_TOKEN,
-          defaultLiffId: liffMatch?.[1] ?? null,
-          proxyDispatch: (request) =>
-            dispatchLineProxyLocally(request, c.env, c.executionCtx),
-        },
-      ),
+    const created = await upsertWebinarRegistration(
+      c.env.DB, webinar.id, auth.friendId, sessionStartAt,
     );
-    return c.json({ ok: true, sessionStartAt });
+    // LIFF の二重タップや通信再試行でも、同一予約の受付確認は1通だけ送る。
+    if (created) {
+      const liffMatch = /liff\.line\.me\/([^/?]+)/.exec(c.env.LIFF_URL ?? '');
+      c.executionCtx.waitUntil(
+        sendWebinarRegistrationConfirmation(
+          c.env.DB,
+          webinar,
+          auth.friendId,
+          sessionStartAt,
+          {
+            proxyBaseUrl: new URL(c.req.url).origin,
+            defaultAccessToken: c.env.LINE_CHANNEL_ACCESS_TOKEN,
+            defaultLiffId: liffMatch?.[1] ?? null,
+            proxyDispatch: (request) =>
+              dispatchLineProxyLocally(request, c.env, c.executionCtx),
+          },
+        ),
+      );
+    }
+    return c.json({ ok: true, sessionStartAt, created });
   } catch (err) {
     console.error('POST webinar register error:', err);
     return c.json({ error: 'internal_error' }, 500);
@@ -558,6 +568,72 @@ webinarRoutes.post('/api/liff/webinars/:slug/funnel-event', async (c) => {
   } catch (err) {
     console.error('POST funnel-event error:', err);
     return c.json({ error: 'internal_error' }, 500);
+  }
+});
+
+// ライブCTAのフォーム送信後、その画面を離れずに個別相談の空き枠を表示する。
+// 予約メニューは webinar_followup_configs.booking_menu_id を唯一の権威とし、
+// URL/body から任意の menu/staff を指定させない。
+webinarRoutes.get('/api/liff/webinars/:slug/consultation-slots', async (c) => {
+  try {
+    const auth = await resolveWebinarCaller(c, c.req.param('slug'));
+    if (auth instanceof Response) return auth;
+    const data = await getWebinarConsultationAvailability(c.env.DB, {
+      webinarId: auth.webinar.id,
+      accountId: auth.webinar.account_id,
+      friendId: auth.friendId,
+      now: new Date(),
+      credentials: {
+        email: c.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        privateKey: c.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+        oauthClientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+        oauthClientSecret: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      },
+    });
+    return c.json({ ok: true, data });
+  } catch (error) {
+    if (error instanceof WebinarConsultationError) {
+      return c.json({ ok: false, error: error.code }, error.status);
+    }
+    console.error('GET webinar consultation slots error:', error);
+    return c.json({ ok: false, error: 'internal_error' }, 500);
+  }
+});
+
+// 空き枠をサーバー側で再検証し、即時確定→Google Meet発行→相談リマインド登録
+// →LINE確定通知まで一括処理する。Google接続/Meet発行が失敗した場合は、内部予約を
+// cancelled に戻して「日程だけ確定・Meetなし」の中途半端な状態を残さない。
+webinarRoutes.post('/api/liff/webinars/:slug/consultation-book', async (c) => {
+  try {
+    const auth = await resolveWebinarCaller(c, c.req.param('slug'));
+    if (auth instanceof Response) return auth;
+    const body = await c.req.json<{ startsAt?: unknown }>();
+    if (typeof body.startsAt !== 'string') {
+      return c.json({ ok: false, error: 'invalid_starts_at' }, 422);
+    }
+    const data = await bookWebinarConsultation(c.env.DB, {
+      webinarId: auth.webinar.id,
+      webinarTitle: auth.webinar.title,
+      accountId: auth.webinar.account_id,
+      friendId: auth.friendId,
+      startsAt: body.startsAt,
+      now: new Date(),
+      credentials: {
+        email: c.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        privateKey: c.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+        oauthClientId: c.env.GOOGLE_OAUTH_CLIENT_ID,
+        oauthClientSecret: c.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      },
+      proxyBaseUrl: new URL(c.req.url).origin,
+      proxyDispatch: (request) => dispatchLineProxyLocally(request, c.env, c.executionCtx),
+    });
+    return c.json({ ok: true, data }, data.created ? 201 : 200);
+  } catch (error) {
+    if (error instanceof WebinarConsultationError) {
+      return c.json({ ok: false, error: error.code }, error.status);
+    }
+    console.error('POST webinar consultation book error:', error);
+    return c.json({ ok: false, error: 'internal_error' }, 500);
   }
 });
 
@@ -982,7 +1058,9 @@ webinarRoutes.get('/api/webinars/:id/analytics', async (c) => {
           sessions: p.sessions,
           firstJoinedAt: p.first_joined_at,
           latestJoinedAt: p.latest_joined_at,
-          maxWatchedSeconds: p.max_watched_seconds,
+          latestWatchedSeconds: p.latest_watched_seconds,
+          // デプロイ中に旧管理画面が残っていても NaN にしない互換フィールド。
+          maxWatchedSeconds: p.latest_watched_seconds,
           ctaClickedAt: p.cta_clicked_at,
           registered: Boolean(p.registered),
           formSubmittedAt: p.form_submitted_at,
