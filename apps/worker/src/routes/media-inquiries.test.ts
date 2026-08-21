@@ -23,7 +23,7 @@ function createEnv(calls: RunCall[]): Env['Bindings'] {
 }
 
 const validBody = {
-  inquiryType: 'LINE Harnessの新規導入',
+  inquiryType: 'L Harnessの新規導入',
   companyName: 'テスト株式会社',
   contactName: '山田 太郎',
   email: 'yamada@example.com',

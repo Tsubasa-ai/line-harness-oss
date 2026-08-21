@@ -35,7 +35,7 @@
 ### Added — Live CTA consultation booking
 
 - After submitting a webinar CTA form, viewers can choose a real-time available consultation slot without leaving the live screen.
-- Availability starts from the staff member's recurring LINE Harness hours, then removes dated overrides, existing bookings, Google Calendar busy periods, and slots inside the lead-time window.
+- Availability starts from the staff member's recurring L Harness hours, then removes dated overrides, existing bookings, Google Calendar busy periods, and slots inside the lead-time window.
 - A confirmed booking creates a Google Calendar event and Google Meet link, registers the consultation, and schedules LINE reminders for the previous day and one hour before the meeting.
 - Staff can connect their own Google account through OAuth. Service-account keys and calendar sharing are no longer required for new installations.
 - OAuth requests only `calendar.events` and `calendar.events.freebusy`, avoiding unrelated Drive or YouTube grants.
@@ -50,7 +50,7 @@
 ### Fixed
 
 - Immediate first-step delivery now evaluates the same step conditions as scheduled delivery.
-- The chat list uses the true latest message for previews, ordering, and pagination, including messages sent through the LINE Harness proxy.
+- The chat list uses the true latest message for previews, ordering, and pagination, including messages sent through the L Harness proxy.
 
 ### Database
 

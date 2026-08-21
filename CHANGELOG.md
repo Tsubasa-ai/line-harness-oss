@@ -1,6 +1,21 @@
 # Changelog
 
+## Brand name update (2026-08-19)
+
+- Public product display name changed from the former name to **L Harness**.
+- Repository URLs, npm package names, CLI commands, and internal identifiers
+  remain unchanged for backward compatibility.
+- Added [BRAND.md](BRAND.md) with naming and third-party trademark policy.
+
 ## v0.21.3 (2026-08-15)
+
+### Worker Assetsアップロードの修正（2026-08-16）
+
+- Cloudflare Workers Assets APIへ送るmanifestキーを必須の`/`始まりへ修正
+- migration完了後、Assets upload session作成時にHTTP 400（code 10304）で停止する問題を解消
+- 修正版CLI `create-line-harness@0.2.8` / update engine `0.0.10`を公開
+- Cloudflare Pagesのasset keyをWrangler互換BLAKE3へ修正し、deploy成功後に全パスHTTP 500となる問題を解消
+- Adminのみを安全に再同期する修正版CLI `create-line-harness@0.2.9` / update engine `0.0.11`を公開
 
 ### 安全なアップデート経路
 
@@ -26,7 +41,7 @@ npx create-line-harness@latest update
 ### ライブCTAから個別相談を即時確定
 
 - オートウェビナーのフォーム送信後、その画面のまま空き枠を選び、個別相談を即時確定
-- LINE Harnessの受付時間、日付別枠、既存予約、Google Calendarの予定、60分のリードタイムを反映し、確定直前にも二重予約を検査
+- L Harnessの受付時間、日付別枠、既存予約、Google Calendarの予定、60分のリードタイムを反映し、確定直前にも二重予約を検査
 - Google Meet付き予定、`meet_consultations`、前日・1時間前のLINEリマインド、確定通知を一括作成
 - 管理画面からGoogleアカウント本人が許可するOAuth接続を追加。サービスアカウントキーとカレンダー共有は不要
 - OAuth権限は `calendar.events` と `calendar.events.freebusy` の2つだけに限定

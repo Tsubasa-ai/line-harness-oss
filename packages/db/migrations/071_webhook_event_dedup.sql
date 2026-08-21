@@ -1,4 +1,4 @@
--- Migration 070: Webhook event dedup
+-- Migration 071: Webhook event dedup
 --
 -- LINE resends a webhook event (same webhookEventId, deliveryContext.isRedelivery
 -- may or may not be set reliably by intermediaries) when our response isn't

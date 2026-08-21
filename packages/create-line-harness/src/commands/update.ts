@@ -14,6 +14,7 @@ import {
   putWorkerScript,
   listWorkerBindings,
   deployPagesProject,
+  verifyPagesDeploymentUrl,
   materializeAdminFiles,
   findResidualPlaceholders,
   applyD1Migrations,
@@ -464,7 +465,7 @@ export async function runUpdate(
   repoDir: string,
   options: RunUpdateOptions = {},
 ): Promise<void> {
-  p.intro(pc.bgCyan(pc.black(" LINE Harness アップデート ")));
+  p.intro(pc.bgCyan(pc.black(" L Harness アップデート ")));
 
   const configPath = join(repoDir, ".line-harness-config.json");
   let state = loadState(repoDir);
@@ -980,6 +981,7 @@ async function deployAdminFromBundle(
       projectName: cfg.adminProject,
       files,
     });
+    await verifyPagesDeploymentUrl(r.url);
     s.stop(`Admin デプロイ完了 (${r.deploymentId.slice(0, 8)})`);
     if (residual.length > 0) {
       p.log.warn(
@@ -1009,6 +1011,7 @@ async function deployLiffFromBundle(
       projectName: cfg.liffProject,
       files: bundle.liffFiles,
     });
+    await verifyPagesDeploymentUrl(r.url);
     s.stop(`LIFF デプロイ完了 (${r.deploymentId.slice(0, 8)})`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

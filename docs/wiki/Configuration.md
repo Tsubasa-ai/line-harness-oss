@@ -1,4 +1,4 @@
-# Configuration — LINE Harness 設定リファレンス
+# Configuration — L Harness 設定リファレンス
 
 ## wrangler.toml
 
@@ -99,11 +99,11 @@ export type Env = {
 2. `calendar.events` と `calendar.events.freebusy` の2スコープを許可します。
 3. OAuthクライアントのコールバックURIへ `<WORKER_URL>/api/booking/google-calendar/oauth/callback` を登録します。
 4. `GOOGLE_OAUTH_CLIENT_ID` と `GOOGLE_OAUTH_CLIENT_SECRET` をWorker secretへ設定します。
-5. LINE Harnessの「予約管理 → スタッフ → 受付時間」で「Googleアカウントで接続」を押します。
+5. L Harnessの「予約管理 → スタッフ → 受付時間」で「Googleアカウントで接続」を押します。
 
 サービスアカウントキーやカレンダー共有は不要です。組織ポリシー `iam.disableServiceAccountKeyCreation` が有効な環境でも、この方式なら接続できます。
 
-接続後は、LINE Harnessの受付時間からGoogleの「予定あり」を除外します。予約が確定するとGoogle Meet付きの予定を作成し、前日・1時間前のLINEリマインドも登録します。Google側を確認できない場合は、二重予約を防ぐため該当スタッフの枠を一時的に非表示にします。
+接続後は、L Harnessの受付時間からGoogleの「予定あり」を除外します。予約が確定するとGoogle Meet付きの予定を作成し、前日・1時間前のLINEリマインドも登録します。Google側を確認できない場合は、二重予約を防ぐため該当スタッフの枠を一時的に非表示にします。
 
 詳しい設定手順、ライブCTAから予約確定までの流れ、エラー解決方法は [Googleカレンダー連携とライブCTA即時予約](28-Google-Calendar-and-Webinar-Booking.md) を参照してください。
 
@@ -230,7 +230,7 @@ app.use('*', cors({
 
 ### 設計方針
 
-LINE Harness は全タイムスタンプを **JST (UTC+9)** で統一しています。理由:
+L Harness は全タイムスタンプを **JST (UTC+9)** で統一しています。理由:
 - LINE公式アカウントの利用者は日本が大多数
 - Cron 配信の時間計算で UTC 変換ミスを防ぐ
 - D1 (SQLite) にはタイムゾーン機能がないため、アプリケーション層で統一

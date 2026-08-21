@@ -1,6 +1,6 @@
 # 28. Googleカレンダー連携とライブCTA即時予約
 
-LINE Harnessでは、オートウェビナーのフォーム送信後に空き日程をその場で表示し、個別相談の予約、Google Meetの発行、LINE通知までをまとめて完了できます。
+L Harnessでは、オートウェビナーのフォーム送信後に空き日程をその場で表示し、個別相談の予約、Google Meetの発行、LINE通知までをまとめて完了できます。
 
 このページでは、普段使う人の設定と、OSSを設置する人が最初に一度だけ行う設定を分けて説明します。
 
@@ -21,24 +21,24 @@ LINE Harnessでは、オートウェビナーのフォーム送信後に空き�
   → 前日・1時間前にLINEリマインド
 ```
 
-スタッフ側では、LINE Harnessに「普段受け付ける曜日と時間」を登録します。Googleカレンダーにすでに入っている予定は、その時間帯から自動で除外されます。
+スタッフ側では、L Harnessに「普段受け付ける曜日と時間」を登録します。Googleカレンダーにすでに入っている予定は、その時間帯から自動で除外されます。
 
 ### 空き枠の考え方
 
-たとえば、LINE Harnessで月曜日の受付時間を `10:00〜19:00` に設定し、Googleカレンダーに `13:00〜14:00` の予定がある場合、13時台は予約候補に出ません。
+たとえば、L Harnessで月曜日の受付時間を `10:00〜19:00` に設定し、Googleカレンダーに `13:00〜14:00` の予定がある場合、13時台は予約候補に出ません。
 
 空き枠は次の順番で決まります。
 
-1. LINE Harnessの「毎週の受付時間」を土台にする
+1. L Harnessの「毎週の受付時間」を土台にする
 2. その日に「日付別の応急枠」があれば、毎週設定より優先する
-3. LINE Harness内の既存予約を除く
+3. L Harness内の既存予約を除く
 4. Googleカレンダーの「予定あり」の時間を除く
 5. 現在から60分以内の枠を除く
 6. 予約メニューの所要時間と、予約後の余白時間を反映する
 
 ライブCTAには、今日から14日先までの候補が30分刻みで表示されます。相談自体の長さは、予約メニューに設定した所要時間です。
 
-> Googleカレンダーは、LINE Harnessで設定した受付時間を勝手に広げません。受付時間の中から、予定が重なる部分だけを閉じます。そのため、自分の自由時間まで全部予約枠になることはありません。
+> Googleカレンダーは、L Harnessで設定した受付時間を勝手に広げません。受付時間の中から、予定が重なる部分だけを閉じます。そのため、自分の自由時間まで全部予約枠になることはありません。
 
 ---
 
@@ -79,7 +79,7 @@ Google Cloudやシークレットの設定が済んでいる環境では、次�
 
 1. 予約管理に使うGoogleアカウントを選ぶ
 2. Googleカレンダーへのアクセスを許可する
-3. LINE Harnessへ戻る
+3. L Harnessへ戻る
 4. 画面に「接続済み」と表示されることを確認する
 
 OAuth方式では、サービスアカウントキーの発行や、カレンダーの共有設定は不要です。
@@ -126,7 +126,7 @@ WHERE webinar_id = 'YOUR_WEBINAR_ID';
 
 予約が確定すると、次が一括で行われます。
 
-- LINE Harnessの予約を「確定」で保存
+- L Harnessの予約を「確定」で保存
 - Googleカレンダーに予定を作成
 - Google Meet URLを発行
 - Meet相談として登録
@@ -141,7 +141,7 @@ GoogleカレンダーやMeetの作成に失敗した場合は、中途半端な�
 
 ## OSS設置者が最初に一度だけ行う設定
 
-ここからは、LINE HarnessをCloudflareへ設置・管理する人向けです。普段の運用担当者は、この章の操作を行う必要はありません。
+ここからは、L HarnessをCloudflareへ設置・管理する人向けです。普段の運用担当者は、この章の操作を行う必要はありません。
 
 ### 1. Google Calendar APIを有効にする
 
@@ -151,7 +151,7 @@ Google Cloud Consoleでプロジェクトを選び、「APIとサービス」か
 
 Google Auth Platformでアプリ情報を登録します。
 
-- アプリ名: 例 `LINE Harness`
+- アプリ名: 例 `L Harness`
 - サポートメール: 管理できるメールアドレス
 - 対象: 組織内だけなら「内部」、組織外アカウントも接続するなら「外部」
 
@@ -216,7 +216,7 @@ pnpm deploy
 iam.disableServiceAccountKeyCreation
 ```
 
-このポリシーを無理に解除する必要はありません。LINE Harnessでは、より安全なOAuth方式を推奨します。管理画面の「Googleアカウントで接続」を使えば、サービスアカウントキーもカレンダー共有も不要です。
+このポリシーを無理に解除する必要はありません。L Harnessでは、より安全なOAuth方式を推奨します。管理画面の「Googleアカウントで接続」を使えば、サービスアカウントキーもカレンダー共有も不要です。
 
 既存環境との互換性のためサービスアカウント方式も残っていますが、新しく設定する場合はOAuth方式を選んでください。
 
@@ -227,8 +227,8 @@ iam.disableServiceAccountKeyCreation
 | 表示・症状 | 主な原因 | 解決方法 |
 |------------|----------|----------|
 | `redirect_uri_mismatch` | Google Cloudに登録したURIとWorkerのコールバックURIが一致していない | Workerの公開URL + `/api/booking/google-calendar/oauth/callback` を完全一致で登録する |
-| `This request contains scopes that cannot be requested together` | 同じGoogle OAuth認可で、DriveやYouTubeなど過去の権限が混ざっている | 最新のLINE Harnessへ更新し、再接続する。LINE HarnessはCalendarの2権限だけを要求する |
-| `ACCESS_TOKEN_SCOPE_INSUFFICIENT` / FreeBusy 403 | 空き時間確認の権限が不足している | `calendar.events.freebusy` を同意画面へ追加し、最新のLINE Harnessから再接続する |
+| `This request contains scopes that cannot be requested together` | 同じGoogle OAuth認可で、DriveやYouTubeなど過去の権限が混ざっている | 最新のL Harnessへ更新し、再接続する。L HarnessはCalendarの2権限だけを要求する |
+| `ACCESS_TOKEN_SCOPE_INSUFFICIENT` / FreeBusy 403 | 空き時間確認の権限が不足している | `calendar.events.freebusy` を同意画面へ追加し、最新のL Harnessから再接続する |
 | 許可後も「未接続」のまま | コールバックURI、Workerシークレット、OAuth公開状態のいずれかが不正 | URLを再読み込みし、直らなければWorkerログの `Google Calendar OAuth callback failed` を確認する |
 | 数日後に急に空き枠が出なくなった | 外部向けOAuthアプリがテスト状態のまま、またはGoogle側で許可を取り消した | OAuthアプリの公開状態とテストユーザーを確認し、管理画面から再接続する |
 | 空き枠が1件も出ない | 受付時間外、60分以内、既存予約、Googleの予定あり、メニュー未設定のいずれか | 毎週の受付時間、日付別枠、予約メニュー、Googleカレンダーを順に確認する |
@@ -244,6 +244,6 @@ iam.disableServiceAccountKeyCreation
 - 本番配信前に、フォーム送信からMeet発行までを1回通す
 - OAuthクライアントシークレットをGit、D1、チャットへ貼らない
 - Google連携を変更した後は、空き枠から既存予定が除外されることを確認する
-- 予約キャンセル時は、LINE Harness上の予約とGoogleカレンダーの両方を確認する
+- 予約キャンセル時は、L Harness上の予約とGoogleカレンダーの両方を確認する
 
 これで、視聴中の熱量を落とさずに、その場で個別相談の日程まで確定できます。

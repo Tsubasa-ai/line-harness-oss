@@ -29,11 +29,11 @@ export interface ApplyD1MigrationsOptions {
  * Split a SQLite migration into individual statements.
  *
  * D1 executes a multi-statement SQL string atomically. That is unsafe for
- * legacy LINE Harness installs: one duplicate ALTER TABLE rolls back later
+ * legacy L Harness installs: one duplicate ALTER TABLE rolls back later
  * statements in the same file. This scanner splits only on semicolons that
  * are outside strings, quoted identifiers, and comments.
  *
- * Current LINE Harness migrations intentionally do not use CREATE TRIGGER
+ * Current L Harness migrations intentionally do not use CREATE TRIGGER
  * bodies (whose internal BEGIN/END semicolons need a full SQLite parser).
  * Fail loudly if one appears so a future release cannot silently split it
  * incorrectly.

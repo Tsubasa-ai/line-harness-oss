@@ -40,7 +40,7 @@ describe('replyViaHarnessProxy', () => {
         [{ type: 'text', text: 'test' }],
         dispatch,
       ),
-    ).rejects.toThrow('LINE Harness proxy error: 400 Bad Request');
+    ).rejects.toThrow('L Harness proxy error: 400 Bad Request');
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

@@ -1136,7 +1136,7 @@ CREATE INDEX IF NOT EXISTS idx_rich_menu_areas_page     ON rich_menu_areas(page_
 CREATE INDEX IF NOT EXISTS idx_rich_menu_groups_account ON rich_menu_groups(account_id, status);
 
 -- ============================================================
--- webhook_event_dedup: LINE webhook 再送による二重処理防止 (migration 070)
+-- webhook_event_dedup: LINE webhook 再送による二重処理防止 (migration 071)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS webhook_event_dedup (
   webhook_event_id TEXT PRIMARY KEY,

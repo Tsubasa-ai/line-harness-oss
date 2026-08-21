@@ -4,7 +4,7 @@ import { authHeader, throwHttpError, workersApiBase } from './_shared.js';
 /**
  * Cloudflare Workers binding shape used by the Workers Scripts API.
  *
- * Only the binding types we care about for the LINE Harness Worker are
+ * Only the binding types we care about for the L Harness Worker are
  * modelled here: env-style plain text, secrets, resource bindings for
  * D1, R2, and KV, and the Workers Assets binding (CLI installs serve the
  * LIFF SPA from Worker assets). Other types (`service`, `queue`,
@@ -239,7 +239,7 @@ export async function deployWorkerVersion(opts: {
         strategy: 'percentage',
         versions: [{ version_id: versionId, percentage: 100 }],
         annotations: {
-          'workers/message': 'LINE Harness automatic update rollback',
+          'workers/message': 'L Harness automatic update rollback',
           'workers/triggered_by': 'line-harness-update-engine',
         },
       }),

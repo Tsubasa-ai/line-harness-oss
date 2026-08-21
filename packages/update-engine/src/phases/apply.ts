@@ -8,7 +8,7 @@ import { materializeAdminFiles } from '../materialize.js';
 import { applyD1Migrations } from '../migrations.js';
 
 /**
- * Compatibility flags the LINE Harness Worker requires. The script upload
+ * Compatibility flags the L Harness Worker requires. The script upload
  * API replaces metadata wholesale, so these must be re-sent on every PUT —
  * omitting them would strip `nodejs_compat` and break `node:*` imports.
  * Kept in lockstep with apps/worker/wrangler.toml.
