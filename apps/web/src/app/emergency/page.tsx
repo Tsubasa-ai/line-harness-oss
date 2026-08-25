@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { api } from '@/lib/api'
+import { withBasePath } from '@/lib/base-path'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 
@@ -92,7 +93,7 @@ export default function EmergencyPage() {
             )
           }
         } else if (id === 'switch-account') {
-          window.location.href = '/health'
+          window.location.href = withBasePath('/health')
           return
         }
         updateAction(id, { status: 'done' })
