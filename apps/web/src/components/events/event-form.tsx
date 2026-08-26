@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { eventsApi, type EventDetail, type EventSlot } from '@/lib/api'
+import { getApiBase } from '@/lib/api-base'
 import ImageUploader from '@/components/shared/image-uploader'
 import OgEditor from '@/components/shared/og-editor'
 import { useAccount } from '@/contexts/account-context'
@@ -81,7 +83,7 @@ export default function EventForm({ accountId, eventId }: EventFormProps) {
   // single mode の公開 URL。Worker `/o` は ref 解決・追跡なしで liffId を直接
   // 受けるため、LINE 内配信も SNS 配信もこの 1 本で完結する。`liff.line.me`
   // 直貼りは OpenChat / IG DM 等で削除されるが、`/o` 経由なら通る。
-  const workerBase = process.env.NEXT_PUBLIC_API_URL ?? ''
+  const workerBase = getApiBase() ?? ''
   const liffUrl = eventId && liffId && workerBase
     ? `${workerBase}/o?liffId=${encodeURIComponent(liffId)}&page=event&id=${encodeURIComponent(eventId)}`
     : null
@@ -214,7 +216,7 @@ export default function EventForm({ accountId, eventId }: EventFormProps) {
     <div className="p-6 max-w-4xl mx-auto">
       {/* breadcrumb */}
       <div className="mb-4 flex items-center gap-2 text-sm">
-        <a href="/events" className="text-blue-600 hover:underline">イベント一覧</a>
+        <Link href="/events" className="text-blue-600 hover:underline">イベント一覧</Link>
         <span className="text-gray-400">/</span>
         <span className="text-gray-700">{eventId ? draft.name || 'イベント編集' : '新規イベント'}</span>
       </div>
@@ -230,12 +232,12 @@ export default function EventForm({ accountId, eventId }: EventFormProps) {
           </p>
         </div>
         {eventId && (
-          <a
+          <Link
             href={`/events/bookings?id=${eventId}`}
             className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50"
           >
             予約を確認
-          </a>
+          </Link>
         )}
       </div>
 
