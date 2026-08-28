@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, vi } from 'vitest';
+import { Hono } from 'hono';
 
 const dbMocks = {
   getWebinars: vi.fn(),
@@ -48,6 +49,17 @@ vi.mock('../services/friend-tag-attach.js', () => tagMock);
 const localProxyMock = { dispatchLineProxyLocally: vi.fn() };
 vi.mock('../services/local-line-proxy.js', () => localProxyMock);
 
+const consultationMock = {
+  getWebinarConsultationAvailability: vi.fn(),
+  bookWebinarConsultation: vi.fn(),
+  WebinarConsultationError: class WebinarConsultationError extends Error {
+    constructor(public code: string, public status: number) {
+      super(code);
+    }
+  },
+};
+vi.mock('../services/webinar-consultation-booking.js', () => consultationMock);
+
 const { webinarRoutes } = await import('./webinars.js');
 const { signWebinarToken } = await import('../lib/webinar-token.js');
 
@@ -84,6 +96,24 @@ function req(path: string, init?: RequestInit) {
   return webinarRoutes.request(path, init, env, execCtx);
 }
 
+// PUT /api/webinars/:id now carries requireRole('owner', 'admin') (final
+// review finding: it was the one route that could still publish a bogus
+// videoPrefix without going through POST .../video's completeness check).
+// That guard reads c.get('staff'), which only the app-level authMiddleware
+// (mounted in index.ts) sets in production — calling webinarRoutes.request()
+// directly bypasses it. Wrap in a minimal app that seeds a staff context,
+// matching the pattern in webinars-upload.test.ts.
+type TestEnv = { Variables: { staff: { id: string; role: 'owner' | 'admin' | 'staff' } } };
+function reqAsStaff(path: string, init?: RequestInit, role: 'owner' | 'admin' | 'staff' = 'owner') {
+  const app = new Hono<TestEnv>();
+  app.use('*', async (c, next) => {
+    c.set('staff', { id: 'staff-1', role });
+    await next();
+  });
+  app.route('/', webinarRoutes);
+  return app.request(path, init, env, execCtx);
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.useFakeTimers();
@@ -105,8 +135,25 @@ beforeEach(() => {
   });
   localProxyMock.dispatchLineProxyLocally.mockResolvedValue(new Response(null, { status: 200 }));
   dbMocks.recordWebinarPickerOpen.mockResolvedValue(undefined);
+  dbMocks.upsertWebinarRegistration.mockResolvedValue(true);
   dbMocks.applyMileageRulesForEvent.mockResolvedValue({
     event: { id: 'mileage-event-1' }, granted: [],
+  });
+  consultationMock.getWebinarConsultationAvailability.mockResolvedValue({
+    calendarReady: true,
+    fallbackUrl: 'https://example.com/booking',
+    menu: { id: 'menu-1', name: '個別相談', durationMinutes: 15 },
+    staff: { id: 'staff-1', name: '野田' },
+    slots: [{
+      date: '2026-07-30', start: '10:00', end: '10:15',
+      startsAt: '2026-07-30T01:00:00.000Z',
+    }],
+    existingBooking: null,
+  });
+  consultationMock.bookWebinarConsultation.mockResolvedValue({
+    bookingId: 'booking-1', status: 'confirmed',
+    startsAt: '2026-07-30T01:00:00.000Z', endsAt: '2026-07-30T01:15:00.000Z',
+    meetUrl: 'https://meet.google.com/abc-defg-hij', externalEventId: 'event-1', created: true,
   });
 });
 
@@ -658,6 +705,17 @@ describe('POST /api/liff/webinars/:slug/register', () => {
     expect(execCtx.waitUntil).toHaveBeenCalled();
   });
 
+  test('同じセッションの重複予約では受付確認を再送しない', async () => {
+    vi.setSystemTime(new Date((SESSION_START - 3600) * 1000));
+    dbMocks.upsertWebinarRegistration.mockResolvedValue(false);
+    const res = await postJson('/api/liff/webinars/test-webinar/register', {
+      sessionStartAt: SESSION_START,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, sessionStartAt: SESSION_START, created: false });
+    expect(execCtx.waitUntil).not.toHaveBeenCalled();
+  });
+
   test('スケジュール上に存在しない時刻は 400', async () => {
     vi.setSystemTime(new Date((SESSION_START - 3600) * 1000));
     const res = await postJson('/api/liff/webinars/test-webinar/register', {
@@ -684,12 +742,64 @@ describe('POST /api/liff/webinars/:slug/register', () => {
   });
 });
 
+describe('webinar consultation booking', () => {
+  test('フォーム送信後の空き枠を認証済みfriendに返す', async () => {
+    const res = await req('/api/liff/webinars/test-webinar/consultation-slots', {
+      headers: { Authorization: 'Bearer t' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      data: { calendarReady: true, slots: [{ start: '10:00' }] },
+    });
+    expect(consultationMock.getWebinarConsultationAvailability).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ webinarId: 'w1', friendId: 'friend-1' }),
+    );
+  });
+
+  test('枠選択でMeet付き相談を即時確定する', async () => {
+    const res = await postJson('/api/liff/webinars/test-webinar/consultation-book', {
+      startsAt: '2026-07-30T01:00:00.000Z',
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      data: { status: 'confirmed', meetUrl: 'https://meet.google.com/abc-defg-hij' },
+    });
+    expect(consultationMock.bookWebinarConsultation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        webinarId: 'w1', webinarTitle: 'テストウェビナー', friendId: 'friend-1',
+        startsAt: '2026-07-30T01:00:00.000Z',
+      }),
+    );
+  });
+
+  test('Googleカレンダー未接続は503で安全にフォールバックできる', async () => {
+    consultationMock.bookWebinarConsultation.mockRejectedValue(
+      new consultationMock.WebinarConsultationError('calendar_not_configured', 503),
+    );
+    const res = await postJson('/api/liff/webinars/test-webinar/consultation-book', {
+      startsAt: '2026-07-30T01:00:00.000Z',
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'calendar_not_configured' });
+  });
+
+  test('日時欠落は422で予約処理を呼ばない', async () => {
+    const res = await postJson('/api/liff/webinars/test-webinar/consultation-book', {});
+    expect(res.status).toBe(422);
+    expect(consultationMock.bookWebinarConsultation).not.toHaveBeenCalled();
+  });
+});
+
 describe('admin CRUD', () => {
   test('POST /api/webinars — 作成して serialize して返す', async () => {
     // beforeEach は slug 既存の mock を入れているので、新規作成用に null に戻す
     dbMocks.getWebinarBySlug.mockResolvedValue(null);
     dbMocks.createWebinar.mockResolvedValue(makeWebinar());
-    const res = await req('/api/webinars', {
+    const res = await reqAsStaff('/api/webinars', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -710,16 +820,40 @@ describe('admin CRUD', () => {
 
   test('POST — title/slug 欠落・slug 形式違反は 400', async () => {
     dbMocks.getWebinarBySlug.mockResolvedValue(null);
-    const noTitle = await req('/api/webinars', {
+    const noTitle = await reqAsStaff('/api/webinars', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug: 'x' }),
     });
     expect(noTitle.status).toBe(400);
-    const badSlug = await req('/api/webinars', {
+    const badSlug = await reqAsStaff('/api/webinars', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 't', slug: 'Bad Slug!' }),
     });
     expect(badSlug.status).toBe(400);
+  });
+
+  // Regression: POST /api/webinars was the one door requireRole('owner',
+  // 'admin') was not applied to. A staff key could create a webinar with an
+  // arbitrary videoPrefix and status: 'active' directly, reaching the same
+  // end state that PUT /api/webinars/:id's guard (see the test above) closed
+  // off — bypassing POST .../video's completeness check entirely.
+  test('POST /api/webinars — staff ロールは 403 (videoPrefix を直接指定して作成できてはいけない)', async () => {
+    dbMocks.getWebinarBySlug.mockResolvedValue(null);
+    const res = await reqAsStaff(
+      '/api/webinars',
+      {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'テストウェビナー',
+          slug: 'test-webinar',
+          videoPrefix: 'rich-menu-images/whatever',
+          status: 'active',
+        }),
+      },
+      'staff',
+    );
+    expect(res.status).toBe(403);
+    expect(dbMocks.createWebinar).not.toHaveBeenCalled();
   });
 
   test('PUT /api/webinars/:id/comments — 一括置換', async () => {
@@ -794,14 +928,14 @@ describe('admin CRUD', () => {
       {
         friend_id: 'friend-1', friend_name: '山田太郎', picture_url: 'https://example.com/u.jpg',
         sessions: 2, first_joined_at: '2026-08-05T10:00:00+09:00',
-        latest_joined_at: '2026-08-06T10:00:00+09:00', max_watched_seconds: 6500,
+        latest_joined_at: '2026-08-06T10:00:00+09:00', latest_watched_seconds: 6500,
         cta_clicked_at: '2026-08-06T11:00:00+09:00', registered: 1,
         form_submitted_at: '2026-08-06T11:01:00+09:00',
       },
       {
         friend_id: 'friend-2', friend_name: '佐藤花子', picture_url: null,
         sessions: 1, first_joined_at: '2026-08-06T10:00:00+09:00',
-        latest_joined_at: '2026-08-06T10:00:00+09:00', max_watched_seconds: 600,
+        latest_joined_at: '2026-08-06T10:00:00+09:00', latest_watched_seconds: 600,
         cta_clicked_at: null, registered: 0, form_submitted_at: null,
       },
     ]);
@@ -851,6 +985,7 @@ describe('admin CRUD', () => {
     expect(body.data.participants[0]).toMatchObject({
       friendId: 'friend-1', friendName: '山田太郎', registered: true,
       pictureUrl: 'https://example.com/u.jpg', formSubmittedAt: '2026-08-06T11:01:00+09:00',
+      latestWatchedSeconds: 6500, maxWatchedSeconds: 6500,
     });
     expect(body.data.formFunnel).toEqual({
       ctaImpressions: 10,
@@ -873,11 +1008,25 @@ describe('admin CRUD', () => {
 
   test('PUT /api/webinars/:id — 空 title は 400 で updateWebinar が呼ばれない', async () => {
     dbMocks.getWebinarById.mockResolvedValue(makeWebinar());
-    const res = await req('/api/webinars/w1', {
+    const res = await reqAsStaff('/api/webinars/w1', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: '  ' }),
     });
     expect(res.status).toBe(400);
+    expect(dbMocks.updateWebinar).not.toHaveBeenCalled();
+  });
+
+  test('PUT /api/webinars/:id — staff ロールは 403 (videoPrefix を直接書き換えて完全性チェックを迂回できてはいけない)', async () => {
+    dbMocks.getWebinarById.mockResolvedValue(makeWebinar());
+    const res = await reqAsStaff(
+      '/api/webinars/w1',
+      {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoPrefix: 'rich-menu-images/whatever' }),
+      },
+      'staff',
+    );
+    expect(res.status).toBe(403);
     expect(dbMocks.updateWebinar).not.toHaveBeenCalled();
   });
 });
