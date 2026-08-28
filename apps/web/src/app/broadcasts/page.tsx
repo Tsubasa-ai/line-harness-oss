@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import type { Tag } from '@line-crm/shared'
 import { api, type ApiBroadcast, type BroadcastInsight } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
@@ -269,9 +270,9 @@ function BroadcastList() {
                     <td className="px-4 py-3">
                       <div>
                         <div className="flex items-center gap-2">
-                          <a href={`/broadcasts?id=${broadcast.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">
+                          <Link href={`/broadcasts?id=${broadcast.id}`} className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">
                             {broadcast.title}
-                          </a>
+                          </Link>
                           {isDedup && (
                             <span className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium bg-purple-100 text-purple-700">
                               複アカ
