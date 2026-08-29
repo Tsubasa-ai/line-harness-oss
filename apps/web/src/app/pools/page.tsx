@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
+import { getApiBase } from '@/lib/api-base'
 import Header from '@/components/layout/header'
 import type { TrafficPool, PoolAccount, LineAccount } from '@line-crm/shared'
 
@@ -90,7 +91,7 @@ function PoolCard({
   onChange: () => void
 }) {
   const isMain = pool.slug === 'main'
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? ''
+  const apiBase = getApiBase() ?? ''
   const publicUrl = `${apiBase}/pool/${pool.slug}`
   const [copied, setCopied] = useState(false)
   const onCopy = async () => {

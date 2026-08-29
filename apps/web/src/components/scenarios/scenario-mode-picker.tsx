@@ -46,16 +46,25 @@ export default function ScenarioModePicker({ open, onClose, onCreate }: Props) {
   const [tags, setTags] = useState<Tag[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  // タグ取得の状態。空ドロップダウンの「理由」を出すために必要。
+  // 開通直後のテナントはタグ0件なので、ここは必ず空になる。
+  const [tagsState, setTagsState] = useState<'loading' | 'ready' | 'failed'>('loading')
 
   // tags 一覧を取得 (tag_added 選択時のドロップダウン用)
   useEffect(() => {
     if (!open) return
+    setTagsState('loading')
     api.tags
       .list()
       .then((res) => {
-        if (res.success) setTags(res.data)
+        if (res.success) {
+          setTags(res.data)
+          setTagsState('ready')
+        } else {
+          setTagsState('failed')
+        }
       })
-      .catch(() => {})
+      .catch(() => setTagsState('failed'))
   }, [open])
 
   if (!open) return null
@@ -227,20 +236,45 @@ export default function ScenarioModePicker({ open, onClose, onCreate }: Props) {
                     トリガータグ <span className="text-red-500">*</span>
                   </label>
                   <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 bg-white disabled:bg-gray-50 disabled:text-gray-400"
                     value={triggerTagId}
                     onChange={(e) => setTriggerTagId(e.target.value)}
+                    disabled={tagsState !== 'ready' || tags.length === 0}
                   >
-                    <option value="">-- 選択してください --</option>
+                    <option value="">
+                      {tagsState === 'loading'
+                        ? '読み込み中…'
+                        : tagsState === 'failed'
+                          ? 'タグを取得できませんでした'
+                          : tags.length === 0
+                            ? 'タグがまだありません'
+                            : '-- 選択してください --'}
+                    </option>
                     {tags.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.name}
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    このタグが友だちに付与されたら、自動でこのシナリオを開始します
-                  </p>
+                  {/* 空のまま理由が出ないと、開通直後のテナント（タグ0件）で
+                      「選べないから作れない」だけが起きて原因が分からない。 */}
+                  {tagsState === 'ready' && tags.length === 0 ? (
+                    <p className="text-xs text-amber-600 mt-1">
+                      タグがまだ1つもありません。先に
+                      <a href="/tags" className="underline font-medium mx-1">
+                        タグ管理
+                      </a>
+                      でタグを作ってから、このシナリオを作成してください。
+                    </p>
+                  ) : tagsState === 'failed' ? (
+                    <p className="text-xs text-red-600 mt-1">
+                      タグ一覧を取得できませんでした。ページを再読み込みしてお試しください。
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      このタグが友だちに付与されたら、自動でこのシナリオを開始します
+                    </p>
+                  )}
                 </div>
               )}
             </div>

@@ -31,6 +31,7 @@ const DEFAULT_TEMPLATE: WeeklyTemplate = {
 export default function StaffShiftsPage() {
   const sp = useSearchParams()
   const staffId = sp.get('staff_id') ?? ''
+  const googleResult = sp.get('google')
   const { selectedAccountId } = useAccount()
   const [staffMember, setStaffMember] = useState<BookingStaff | null>(null)
   const [shifts, setShifts] = useState<BookingShift[]>([])
@@ -39,6 +40,8 @@ export default function StaffShiftsPage() {
   const [calendarConnected, setCalendarConnected] = useState(false)
   const [serviceAccountEmail, setServiceAccountEmail] = useState<string | null>(null)
   const [serviceAccountConfigured, setServiceAccountConfigured] = useState(false)
+  const [oauthConfigured, setOauthConfigured] = useState(false)
+  const [hasSavedWorkingHours, setHasSavedWorkingHours] = useState(true)
   const [loading, setLoading] = useState(true)
   const [savingRules, setSavingRules] = useState(false)
   const [savingCalendar, setSavingCalendar] = useState(false)
@@ -58,6 +61,13 @@ export default function StaffShiftsPage() {
       ])
       setStaffMember(staff.staff.find((item) => item.id === staffId) ?? null)
       setShifts(dated.shifts)
+      // 期限切れの日付別シフトや無効化済みルールだけでは予約枠は生まれない。
+      // availability 計算と同じ「使える受付時間」の定義で警告を判定する。
+      const todayJst = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10)
+      setHasSavedWorkingHours(
+        rules.rules.some((rule) => rule.is_active === 1) ||
+        dated.shifts.some((shift) => shift.work_date >= todayJst),
+      )
       if (rules.rules.length > 0) {
         const next: WeeklyTemplate = {
           sun: null, mon: null, tue: null, wed: null, thu: null, fri: null, sat: null,
@@ -72,6 +82,7 @@ export default function StaffShiftsPage() {
       setCalendarConnected(Boolean(calendar.connection))
       setServiceAccountEmail(calendar.service_account.email)
       setServiceAccountConfigured(calendar.service_account.configured)
+      setOauthConfigured(calendar.oauth.configured)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -80,6 +91,12 @@ export default function StaffShiftsPage() {
   }, [selectedAccountId, staffId])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    if (googleResult === 'connected') setSuccess('Googleカレンダーに接続しました。予定ありの時間は予約枠から自動で除外されます。')
+    if (googleResult === 'denied') setError('Googleカレンダーへのアクセスが許可されませんでした。')
+    if (googleResult === 'error') setError('Googleカレンダーへ接続できませんでした。もう一度お試しください。')
+  }, [googleResult])
 
   async function saveRules() {
     if (!selectedAccountId || !staffId) return
@@ -94,6 +111,8 @@ export default function StaffShiftsPage() {
           : []
       })
       await bookingApi.putAvailabilityRules(selectedAccountId, staffId, rules)
+      const todayJst = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(0, 10)
+      setHasSavedWorkingHours(rules.length > 0 || shifts.some((shift) => shift.work_date >= todayJst))
       setSuccess('毎週の受付時間を保存しました。今後は期限切れせず、自動で枠が作られます。')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -103,11 +122,17 @@ export default function StaffShiftsPage() {
   }
 
   async function connectCalendar() {
-    if (!selectedAccountId || !staffId || !calendarId.trim()) return
+    if (!selectedAccountId || !staffId) return
     setSavingCalendar(true)
     setError(null)
     setSuccess(null)
     try {
+      if (oauthConfigured) {
+        const result = await bookingApi.startGoogleCalendarOAuth(selectedAccountId, staffId)
+        window.location.assign(result.authorization_url)
+        return
+      }
+      if (!calendarId.trim()) return
       await bookingApi.putGoogleCalendar(selectedAccountId, staffId, calendarId.trim())
       setCalendarConnected(true)
       setSuccess('Googleカレンダーに接続しました。予定ありの時間は予約枠から自動で除外されます。')
@@ -150,6 +175,12 @@ export default function StaffShiftsPage() {
         <div className="rounded-lg border border-gray-200 bg-white p-12 text-center text-sm text-gray-500">読み込み中…</div>
       ) : (
         <div className="space-y-4">
+          {!hasSavedWorkingHours && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+              <span className="font-semibold">受付時間がまだ保存されていません。</span>
+              下の内容を確認して「受付時間を保存」を押すまで、このスタッフの予約枠は一切表示されません。
+            </div>
+          )}
           <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-200 bg-gray-50 px-5 py-4">
               <h2 className="font-semibold text-gray-900">毎週の受付時間</h2>
@@ -201,18 +232,22 @@ export default function StaffShiftsPage() {
               </div>
             </div>
             <div className="space-y-4 p-5">
-              {!serviceAccountConfigured && (
+              {oauthConfigured ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+                  Googleアカウント本人の許可で安全に接続します。サービスアカウントキーやカレンダー共有は不要です。
+                </div>
+              ) : !serviceAccountConfigured && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  OSS管理者によるGoogleサービスアカウント設定が必要です。
+                  管理者によるGoogle OAuthまたはサービスアカウント設定が必要です。
                 </div>
               )}
-              {serviceAccountEmail && (
+              {!oauthConfigured && serviceAccountEmail && (
                 <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-900">
                   Googleカレンダーの「設定と共有」で、次のメールアドレスに「予定の変更」権限を付けて共有してください。<br />
                   <code className="mt-2 inline-block break-all rounded bg-white px-2 py-1 text-xs">{serviceAccountEmail}</code>
                 </div>
               )}
-              <label className="block">
+              {!oauthConfigured && <label className="block">
                 <span className="mb-1.5 block text-sm font-medium text-gray-700">GoogleカレンダーID</span>
                 <input
                   value={calendarId}
@@ -221,11 +256,11 @@ export default function StaffShiftsPage() {
                   className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-100"
                 />
                 <span className="mt-1.5 block text-xs text-gray-500">Googleカレンダー → 設定と共有 → カレンダーの統合 → カレンダーID</span>
-              </label>
+              </label>}
               <div className="flex justify-end gap-2">
                 {calendarConnected && <button onClick={disconnectCalendar} className="rounded-lg border border-red-200 px-4 py-2 text-sm text-red-600">連携解除</button>}
-                <button onClick={connectCalendar} disabled={savingCalendar || !calendarId.trim() || !serviceAccountConfigured} className="rounded-lg bg-[#06C755] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
-                  {savingCalendar ? '接続確認中…' : calendarConnected ? '再接続して確認' : '接続して確認'}
+                <button onClick={connectCalendar} disabled={savingCalendar || (!oauthConfigured && (!calendarId.trim() || !serviceAccountConfigured))} className="rounded-lg bg-[#06C755] px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  {savingCalendar ? '接続画面を開いています…' : oauthConfigured ? (calendarConnected ? 'Googleアカウントを再接続' : 'Googleアカウントで接続') : (calendarConnected ? '再接続して確認' : '接続して確認')}
                 </button>
               </div>
             </div>

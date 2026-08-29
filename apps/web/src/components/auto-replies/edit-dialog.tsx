@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { api } from '@/lib/api'
 import ImageUploader from '@/components/shared/image-uploader'
 
@@ -187,7 +188,7 @@ export default function EditDialog({ draft, templates, onClose, onSaved }: Props
               </select>
               {templates.length === 0 && (
                 <p className="text-[11px] text-amber-600 mt-1">
-                  テンプレートがありません。<a href="/templates" className="underline">/templates</a> で作成してください。
+                  テンプレートがありません。<Link href="/templates" className="underline">/templates</Link> で作成してください。
                 </p>
               )}
             </div>
