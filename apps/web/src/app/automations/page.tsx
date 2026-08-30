@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { api } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
@@ -424,9 +425,9 @@ export default function AutomationsPage() {
                   <div className="flex items-center gap-4 text-xs text-gray-400 mb-3">
                     <span>アクション: {automation.actions.length}件</span>
                     {sendMsgWithTpl > 0 && (
-                      <a href="/templates" className="text-blue-600 hover:underline" title="template_id 参照を含む send_message action あり">
+                      <Link href="/templates" className="text-blue-600 hover:underline" title="template_id 参照を含む send_message action あり">
                         🔗 template×{sendMsgWithTpl}
-                      </a>
+                      </Link>
                     )}
                     <span>優先度: {automation.priority}</span>
                   </div>
