@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { api, fetchApi } from '@/lib/api'
+import { getApiBase } from '@/lib/api-base'
 import Header from '@/components/layout/header'
 import { useAccount } from '@/contexts/account-context'
 import type { EntryRoute, TrafficPool, Scenario, Tag } from '@line-crm/shared'
@@ -51,7 +52,12 @@ interface RefDetail {
   friends: RefFriend[]
 }
 
-const WORKER_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
+// 呼び出し時 (call time) に解決する — モジュールスコープの定数にすると、静的
+// 書き出し（window 未定義）の時点で値が確定してしまい、共有ビルドではプレース
+// ホルダーが焼き付いたまま固定される（友だち追加 QR が壊れる原因になった）。
+function workerBase(): string {
+  return getApiBase() ?? ''
+}
 
 export default function InflowLinksPage() {
   const { selectedAccountId } = useAccount()
@@ -152,7 +158,7 @@ export default function InflowLinksPage() {
   }, [selectedAccountId])
 
   const onCopy = async (refCode: string, id: string) => {
-    const url = `${WORKER_BASE}/r/${refCode}`
+    const url = `${workerBase()}/r/${refCode}`
     try {
       await navigator.clipboard.writeText(url)
       setCopiedId(id)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { api } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
 import Header from '@/components/layout/header'
@@ -130,9 +131,9 @@ export default function AutoRepliesPage() {
     if (!r.templateId) return <span className="text-[11px] text-gray-400 italic">(inline)</span>
     const tpl = templateById.get(r.templateId)
     return (
-      <a href="/templates" className="text-blue-600 hover:underline text-xs">
+      <Link href="/templates" className="text-blue-600 hover:underline text-xs">
         🔗 {tpl?.name ?? `(未知 ${r.templateId.slice(0, 6)})`}
-      </a>
+      </Link>
     )
   }
 

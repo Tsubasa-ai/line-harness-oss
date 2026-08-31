@@ -3,11 +3,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Header from '@/components/layout/header'
 import { api, type AffiliateOffer, type ConversionApprovalItem } from '@/lib/api'
+import { getApiBase } from '@/lib/api-base'
 import type { Tag, Scenario, LineAccount } from '@line-crm/shared'
 
-const WORKER_BASE = process.env.NEXT_PUBLIC_API_URL
-if (!WORKER_BASE) {
-  throw new Error('NEXT_PUBLIC_API_URL is not set. Build cannot proceed.')
+// 呼び出し時 (call time) に解決する — モジュールスコープで評価すると、静的
+// 書き出し（window 未定義）の時点で値が確定してしまい、共有ビルドではプレース
+// ホルダーが焼き付いたまま固定される。コンポーネント本体から呼ぶことで、
+// ブラウザでの実行時にのみチェックが走るようにする。
+function assertWorkerBaseConfigured(): void {
+  if (!getApiBase()) {
+    throw new Error('NEXT_PUBLIC_API_URL is not set.')
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +139,7 @@ function parseTab(raw: string | null): PageTab {
 }
 
 export default function AffiliatesPage() {
+  assertWorkerBaseConfigured()
   // ?tab= で選択タブを保持（リロードで維持）。chats ページの unanswered=1 と同じく
   // useSearchParams (Suspense 要) を避け、window.location + history.replaceState で扱う。
   const [tab, setTab] = useState<PageTab>(() => {
