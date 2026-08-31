@@ -143,6 +143,20 @@ export default function WebinarForm({ initial }: WebinarFormProps) {
             className={`${inputClass} w-32`}
           />
         </div>
+        {!videoPrefix.trim() && (
+          <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-700">
+            <p className="font-bold text-amber-900">動画のアップロードは Claude Code / Codex から行います</p>
+            <p className="mt-2">
+              この画面からは動画をアップロードできません。動画の変換には ffmpeg が必要です。お使いの AI エージェントに次のように依頼してください。
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-lg bg-white/70 p-2 text-xs text-slate-700">
+              seminar.mp4 をこのウェビナーにアップロードして
+            </pre>
+            <p className="mt-2 text-xs text-amber-600">
+              変換に30分以上かかることがあります（2時間の動画の場合）。完了するまで視聴者には表示されません。
+            </p>
+          </div>
+        )}
         <details className="group rounded-xl border border-slate-200 bg-slate-50/60">
           <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-slate-700">
             URL・動画ファイルの詳細設定
