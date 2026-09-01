@@ -3,8 +3,16 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
+import { getApiBase } from '@/lib/api-base'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
+import Header from '@/components/layout/header'
+import { HarnessStatCard } from '@/components/ui/harness-ui'
+import { Badge } from '@cloudflare/kumo/components/badge'
+import { Banner } from '@cloudflare/kumo/components/banner'
+import { Button } from '@cloudflare/kumo/components/button'
+import { Input } from '@cloudflare/kumo/components/input'
+import { LayerCard } from '@cloudflare/kumo/components/layer-card'
 
 const ccPrompts = [
   {
@@ -34,54 +42,19 @@ interface DashboardStats {
   scoringRuleCount: number | null
 }
 
-interface StatCardProps {
-  title: string
-  value: number | null
-  loading: boolean
-  icon: React.ReactNode
-  href: string
-  accentColor?: string
-}
-
-function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }: StatCardProps) {
-  return (
-    <Link href={href} className="block bg-white rounded-lg shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow group">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-500 mb-2">{title}</p>
-          {loading ? (
-            <div className="h-8 w-20 bg-gray-100 rounded animate-pulse" />
-          ) : (
-            <p className="text-3xl font-bold text-gray-900">
-              {value !== null ? value.toLocaleString('ja-JP') : '-'}
-            </p>
-          )}
-        </div>
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center text-white shrink-0"
-          style={{ backgroundColor: accentColor }}
-        >
-          {icon}
-        </div>
-      </div>
-      <p className="text-xs text-gray-400 mt-3 group-hover:text-green-600 transition-colors">
-        詳細を見る →
-      </p>
-    </Link>
-  )
-}
-
-// 友だち追加リンクの即時取得カード。/auth/line は UUID 付与・アカウント解決・
-// PC では QR ランディング表示までやる正規の流入口なので、共有リンクは常に
-// これを配る (公式の lin.ee 直リンクだと計測も UUID 紐づけも失われる)。
+// 友だち追加リンクの即時取得カード。/r/dashboard は OS 対応ランディング経由で
+// LINE アプリを直接開く流入口（モバイル: LIFF Universal Link / PC: QR）。
+// UUID 付与・アカウント解決は LIFF 側 /api/liff/link が担い、ref=dashboard が
+// friends.ref_code に流入元として記録される。/auth/line?account= を配らないのは
+// モバイルブラウザで Web 版 LINE ログインが挟まり離脱を生むため
+// (公式の lin.ee 直リンクだと計測も UUID 紐づけも失われるのは従来どおり)。
 function FriendAddLinkCard() {
   const { selectedAccount } = useAccount()
   const [copied, setCopied] = useState(false)
-  const [showQr, setShowQr] = useState(false)
-  const base = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '')
+  const base = (getApiBase() ?? '').replace(/\/$/, '')
   const link = selectedAccount
-    ? `${base}/auth/line?account=${encodeURIComponent(selectedAccount.channelId)}`
-    : `${base}/auth/line`
+    ? `${base}/r/dashboard?account=${encodeURIComponent(selectedAccount.channelId)}`
+    : `${base}/r/dashboard`
 
   const onCopy = async () => {
     try {
@@ -94,7 +67,7 @@ function FriendAddLinkCard() {
   }
 
   return (
-    <div className="mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <LayerCard className="mb-6 p-4">
       <div className="flex items-center justify-between mb-2">
         <div>
           <p className="text-sm font-semibold text-gray-800">友だち追加リンク</p>
@@ -104,43 +77,26 @@ function FriendAddLinkCard() {
               : 'デフォルトアカウントへの追加リンク (UUID計測つき)'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowQr((v) => !v)}
-          className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 font-medium text-gray-600"
-        >
-          {showQr ? 'QRを隠す' : 'QR表示'}
-        </button>
       </div>
       <div className="flex items-stretch gap-2">
-        <input
+        <Input
+          aria-label="友だち追加リンク"
           readOnly
           value={link}
           onFocus={(e) => e.currentTarget.select()}
-          className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono bg-gray-50 text-gray-700 truncate"
+          className="flex-1 font-mono text-xs"
         />
-        <button
+        <Button
           type="button"
           onClick={onCopy}
-          className="px-4 rounded-lg text-xs font-medium text-white shrink-0"
-          style={{ backgroundColor: copied ? '#059669' : '#06C755' }}
+          variant="primary"
+          size="sm"
+          className="shrink-0"
         >
           {copied ? 'コピーしました ✓' : 'コピー'}
-        </button>
+        </Button>
       </div>
-      {showQr && (
-        <div className="mt-3 flex justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element -- worker QR proxy, not a static asset */}
-          <img
-            src={`${base}/api/qr?data=${encodeURIComponent(link)}&size=240x240`}
-            alt="友だち追加QRコード"
-            width={240}
-            height={240}
-            className="border border-gray-200 rounded-lg"
-          />
-        </div>
-      )}
-    </div>
+    </LayerCard>
   )
 }
 
@@ -209,20 +165,15 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">ダッシュボード</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {selectedAccount
-            ? `${selectedAccount.displayName || selectedAccount.name} の管理画面`
-            : 'LINE公式アカウント CRM 管理画面'}
-        </p>
-      </div>
+      <Header
+        title="ダッシュボード"
+        product="LINE"
+        description={selectedAccount
+          ? `${selectedAccount.displayName || selectedAccount.name} の管理画面`
+          : 'LINE公式アカウント CRM 管理画面'}
+      />
 
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {error}
-        </div>
-      )}
+      {error && <Banner className="mb-6" variant="error" title="データを読み込めませんでした" description={error} />}
 
       <FriendAddLinkCard />
 
@@ -238,19 +189,18 @@ export default function DashboardPage() {
             <p className="text-sm font-bold text-gray-900">LINE で体験する</p>
             <p className="text-xs text-gray-500 mt-0.5">友だち追加でステップ配信・フォーム・自動返信を体験</p>
           </div>
-          <span className="text-xs px-3 py-1.5 rounded-full text-white font-medium" style={{ backgroundColor: '#06C755' }}>
-            友だち追加
-          </span>
+          <Badge variant="success">友だち追加</Badge>
         </div>
       </a>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
-        <StatCard
+        <HarnessStatCard
           title="友だち数"
           value={stats.friendCount}
           loading={loading}
           href="/friends"
+          accentColor="var(--color-kumo-brand)"
           icon={
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -258,7 +208,7 @@ export default function DashboardPage() {
             </svg>
           }
         />
-        <StatCard
+        <HarnessStatCard
           title="アクティブシナリオ数"
           value={stats.activeScenarioCount}
           loading={loading}
@@ -271,7 +221,7 @@ export default function DashboardPage() {
             </svg>
           }
         />
-        <StatCard
+        <HarnessStatCard
           title="配信数 (合計)"
           value={stats.broadcastCount}
           loading={loading}
@@ -288,7 +238,7 @@ export default function DashboardPage() {
 
       {/* Round 3 summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
-        <StatCard
+        <HarnessStatCard
           title="テンプレート数"
           value={stats.templateCount}
           loading={loading}
@@ -301,7 +251,7 @@ export default function DashboardPage() {
             </svg>
           }
         />
-        <StatCard
+        <HarnessStatCard
           title="アクティブルール数"
           value={stats.automationCount}
           loading={loading}
@@ -314,7 +264,7 @@ export default function DashboardPage() {
             </svg>
           }
         />
-        <StatCard
+        <HarnessStatCard
           title="マイル付与ルール数"
           value={stats.scoringRuleCount}
           loading={loading}
@@ -337,7 +287,7 @@ export default function DashboardPage() {
             href="/friends"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors group"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0" style={{ backgroundColor: '#06C755' }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse shrink-0 bg-kumo-brand">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -385,7 +335,7 @@ export default function DashboardPage() {
             href="/chats"
             className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-green-300 hover:bg-green-50 transition-colors group"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0" style={{ backgroundColor: '#06C755' }}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-kumo-inverse shrink-0 bg-kumo-brand">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
