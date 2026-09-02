@@ -1,6 +1,6 @@
 import type { CfApiCreds } from '../types.js';
 import { authHeader, pagesProjectApiBase, throwHttpError } from './_shared.js';
-import { hashWorkerAsset } from './assets.js';
+import { hashWorkerAsset } from './asset-hash.js';
 
 /**
  * Cloudflare Pages Direct Upload API.

@@ -12,6 +12,7 @@ import {
   getFriendById,
   getLineAccountById,
   jstNow,
+  resolveDefaultLineAccount,
 } from '@line-crm/db';
 import { enrollFriendInScenario } from '@line-crm/db';
 import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
@@ -49,12 +50,30 @@ async function resolveFriendAccessToken(
   return account?.channel_access_token ?? defaultAccessToken;
 }
 
+/**
+ * フォームの公開 URL（LIFF URL）を組み立てる。
+ *
+ * ホスト直下（`https://<host>/?page=form&id=...`）では **liff.init が完了せず
+ * 永遠に読み込み中になる** — クライアントは `liffId` をクエリから読む設計で、
+ * その値は `line_accounts` にしか無いため。正しくは liff.line.me 経由で開く。
+ *
+ * これをレスポンスに含めていなかったせいで、AI エージェントが自力で URL を
+ * 組み立てて動かない画面を作る事故が起きた（2026-08-25 の実戦報告）。
+ * `liffId` 未設定（LIFF 未構成）のテナントでは null を返す。
+ */
+function formPublicUrl(liffId: string | null | undefined, formId: string): string | null {
+  if (!liffId) return null;
+  return `https://liff.line.me/${liffId}?page=form&id=${formId}`;
+}
+
 function serializeForm(
   row: DbForm,
-  extra?: { lastSubmittedAt?: string | null; usedByAccounts?: FormUsedByAccount[] },
+  extra?: { lastSubmittedAt?: string | null; usedByAccounts?: FormUsedByAccount[]; liffId?: string | null },
 ) {
   return {
     id: row.id,
+    /** 公開 URL（LIFF）。LIFF 未設定なら null。ホスト直下の URL では動かない。 */
+    formUrl: formPublicUrl(extra?.liffId, row.id),
     name: row.name,
     description: row.description,
     fields: JSON.parse(row.fields || '[]') as unknown[],
@@ -162,12 +181,14 @@ function serializeSubmission(row: DbFormSubmission & { friend_name?: string | nu
 forms.get('/api/forms', async (c) => {
   try {
     const items = await getFormsWithStats(c.env.DB);
+    const liffId = (await resolveDefaultLineAccount(c.env.DB))?.liff_id ?? null;
     return c.json({
       success: true,
       data: items.map((row) =>
         serializeForm(row, {
           lastSubmittedAt: row.last_submitted_at,
           usedByAccounts: row.used_by_accounts,
+          liffId,
         }),
       ),
     });
@@ -186,7 +207,7 @@ forms.get('/api/forms/:id', async (c) => {
       return c.json({ success: false, error: 'Form not found' }, 404);
     }
     const data = c.get('staff')
-      ? serializeForm(form)
+      ? serializeForm(form, { liffId: (await resolveDefaultLineAccount(c.env.DB))?.liff_id ?? null })
       : serializePublicForm(
           form,
           await consultationWebinarSlugForForm(c.env.DB, id),
@@ -239,7 +260,8 @@ forms.post('/api/forms', async (c) => {
       ogImageUrl: body.ogImageUrl ?? null,
     });
 
-    return c.json({ success: true, data: serializeForm(form) }, 201);
+    const liffId = (await resolveDefaultLineAccount(c.env.DB))?.liff_id ?? null;
+    return c.json({ success: true, data: serializeForm(form, { liffId }) }, 201);
   } catch (err) {
     console.error('POST /api/forms error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
@@ -292,7 +314,8 @@ forms.put('/api/forms/:id', async (c) => {
       return c.json({ success: false, error: 'Form not found' }, 404);
     }
 
-    return c.json({ success: true, data: serializeForm(updated) });
+    const liffId = (await resolveDefaultLineAccount(c.env.DB))?.liff_id ?? null;
+    return c.json({ success: true, data: serializeForm(updated, { liffId }) });
   } catch (err) {
     console.error('PUT /api/forms/:id error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);

@@ -1,8 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { LineClient } from '@line-crm/line-sdk';
 import {
-  getLineAccounts,
   getTrafficPoolBySlug,
   getTrafficPoolById,
   getRandomPoolAccount,
@@ -12,24 +10,9 @@ import {
   getLineAccountById,
   getAffiliateLinkByRefCode,
   incrementAffiliateLinkClick,
-  enqueueFollowingMileageMilestones,
-  processPendingMileageEvents,
 } from '@line-crm/db';
-import { processStepDeliveries } from './services/step-delivery.js';
-import { processScheduledBroadcasts, processQueuedBroadcasts } from './services/broadcast.js';
-import { processReminderDeliveries } from './services/reminder-delivery.js';
-import { checkAccountHealth } from './services/ban-monitor.js';
-import { refreshLineAccessTokens } from './services/token-refresh.js';
-import { processInsightFetch } from './services/insight-fetcher.js';
-import { processDueReminders } from './services/booking-reminders.js';
-import { runExpirer } from './services/booking-expirer.js';
-import { processDueEventReminders } from './services/event-booking-reminders.js';
-import { processDueMeetConsultationReminders } from './services/meet-consultation-reminders.js';
-import { runEventBookingExpirer } from './services/event-booking-expirer.js';
-import { sendEventBookingNotification } from './services/event-booking-notifier.js';
-import { sendBookingNotification } from './services/booking-notifier.js';
-import { purgeExpiredWebhookEvents } from './services/webhook-event-dedup.js';
-import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
+import { scheduled } from './scheduled.js';
+import { TenantScheduler } from './durable-objects/tenant-scheduler.js';
 import { authMiddleware } from './middleware/auth.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 import { webhook } from './routes/webhook.js';
@@ -44,6 +27,7 @@ import { affiliates } from './routes/affiliates.js';
 import { affiliateOffers } from './routes/affiliate-offers.js';
 import { duplicates } from './routes/duplicates.js';
 import { usersGrouped } from './routes/users-grouped.js';
+import { usage } from './routes/usage.js';
 import { inbox } from './routes/inbox.js';
 import { openapi } from './routes/openapi.js';
 import { liffRoutes } from './routes/liff.js';
@@ -57,9 +41,11 @@ import { scoring } from './routes/scoring.js';
 import { templates } from './routes/templates.js';
 import { chats } from './routes/chats.js';
 import { conversations } from './routes/conversations.js';
-// notifications ルート (notification_rules CRUD + notifications 一覧) は
-// インボックス機能 (/api/inbox/unanswered) に置き換えたため削除。
-// DB テーブル notification_rules / notifications は archive 目的で残してある。
+// notifications ルート: 一度インボックス機能 (/api/inbox/unanswered) に置き換えて
+// 削除したが、クォータ不足通知 (services/quota-alert.ts, 2026-09-01 事故対応) が
+// notifications / notification_rules に書き込むようになったため再マウント。
+// 書き込み側だけ復活して読み手が居ないと「通知したつもり」になるのが最悪のため。
+import { notifications } from './routes/notifications.js';
 import { stripe } from './routes/stripe.js';
 import { health } from './routes/health.js';
 import { automations } from './routes/automations.js';
@@ -76,6 +62,7 @@ import { setup } from './routes/setup.js';
 import { autoReplies } from './routes/auto-replies.js';
 import { adminAuth } from './routes/admin-auth.js';
 import { resolveCorsOrigin } from './middleware/admin-auth-config.js';
+import { defaultCachePolicyMiddleware } from './middleware/cache-policy.js';
 import booking from './routes/booking.js';
 import events from './routes/events.js';
 import { trafficPools } from './routes/traffic-pools.js';
@@ -150,6 +137,20 @@ export type Env = {
     // the Worker keeps a refresh token and never needs a service-account key.
     GOOGLE_OAUTH_CLIENT_ID?: string;
     GOOGLE_OAUTH_CLIENT_SECRET?: string;
+    /** Days to keep messages_log rows. Unset/invalid = keep forever. */
+    LOG_RETENTION_DAYS?: string;
+    /** Max friends (is_following=1). Unset/invalid = unlimited. */
+    QUOTA_FRIENDS_MAX?: string;
+    /** Max outgoing push messages per JST month. Unset/invalid = unlimited. */
+    QUOTA_MONTHLY_MESSAGES_MAX?: string;
+    /** Optional URL shown to admins when a quota is exceeded. */
+    QUOTA_NOTICE_URL?: string;
+    // 分・6時間の定期ジョブを自走させる DO。バインディング名 TENANT_SCHEDULER は
+    // テナントを自動プロビジョニングする側 (scripts/lib/tenant-wrangler.ts) にも
+    // 同名で書いてあり、ここと食い違うと「デプロイは成功するがアラームは一生
+    // armed されない」という気づきにくい壊れ方をするので、変更するときは
+    // 両方揃えること。実体は durable-objects/tenant-scheduler.ts の TenantScheduler。
+    TENANT_SCHEDULER: DurableObjectNamespace<TenantScheduler>;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -157,6 +158,11 @@ export type Env = {
 };
 
 const app = new Hono<Env>();
+
+// Private Workers Cache pilot: only responses that deliberately declare a
+// public Cache-Control policy may enter the cache. This wrapper runs after all
+// downstream handlers and supplies no-store to every unmarked response.
+app.use('*', defaultCachePolicyMiddleware);
 
 // Public form endpoint used by the-harness.com. Keep this allowlist separate
 // from credentialed admin CORS so the media origin gains access to this route
@@ -204,6 +210,7 @@ app.route('/', affiliates);
 app.route('/', affiliateOffers);
 app.route('/', duplicates);
 app.route('/', usersGrouped);
+app.route('/', usage);
 app.route('/', inbox);
 app.route('/', openapi);
 app.route('/', liffRoutes);
@@ -218,6 +225,7 @@ app.route('/', reminders);
 app.route('/', scoring);
 app.route('/', templates);
 app.route('/', chats);
+app.route('/', notifications);
 app.route('/', conversations);
 app.route('/', stripe);
 app.route('/', health);
@@ -908,7 +916,11 @@ export async function notFoundHandler(
     return c.html(html);
   }
 
-  // Serve static assets (admin dashboard, LIFF pages).
+  // Serve static assets. Since the three-surfaces bundle (2026-08-24) the ASSETS
+  // binding can hold up to three surfaces at once — root (this Worker's own
+  // dist/client, i.e. the LIFF app / friend-add flow), `/<adminBasePath>` (admin
+  // dashboard), `/liff-app` (apps/liff) — see the SPA-fallback comment below for
+  // how a deep link under one of those prefixes finds its own index.html.
   // ASSETS binding is missing when wrangler runs without a built `dist/client`
   // (fresh clone, vitest, or a deploy where the assets directive was stripped).
   // Without this guard every GET / surfaces as
@@ -923,8 +935,29 @@ export async function notFoundHandler(
   // アセットストアに実ファイルが無く 404 で返る。HTML を要求する GET
   // ナビゲーションに限り index.html を返してクライアントルーターに任せる。
   // それ以外 (存在しない .js/.png への参照など) は 404 のまま透過する。
+  //
+  // three-surfaces bundle（2026-08-24）
+  // 以降、このオリジンは複数のクライアントルート SPA を配信する — root は LIFF アプリ
+  // （friend-add フロー本体）、`/<adminBasePath>/*`（例: `/console`）は admin、
+  // `/liff-app/*` は apps/liff。フォールバック先を root 固定にすると、admin や
+  // apps/liff の深いリンクが LIFF アプリの index.html に着地して壊れる。
+  // どのプレフィックスが実際に存在するかは line-harness 側のビルド（basePath 設定）が
+  // 決めるので、ここでは決め打ちせず「先頭パスセグメント配下に index.html があれば
+  // それを使う、無ければ root にフォールバック」という汎用ロジックにしてある —
+  // 既存の root 直下ルート（/webinar/:slug, /events/:id, /book 等）はどのみち
+  // 該当セグメント名のディレクトリを持たないので、1回余分に 404 を踏んで root へ
+  // 落ちるだけで従来の挙動と変わらない。
   const accept = c.req.header('accept') ?? '';
   if (c.req.method === 'GET' && accept.includes('text/html')) {
+    const firstSegment = path.split('/').find((s) => s.length > 0);
+    if (firstSegment) {
+      const prefixedRes = await c.env.ASSETS.fetch(
+        new Request(new URL(`/${firstSegment}/index.html`, c.req.url).toString(), {
+          headers: c.req.raw.headers,
+        }),
+      );
+      if (prefixedRes.status !== 404) return prefixedRes;
+    }
     return c.env.ASSETS.fetch(
       new Request(new URL('/', c.req.url).toString(), { headers: c.req.raw.headers }),
     );
@@ -933,229 +966,10 @@ export async function notFoundHandler(
 }
 app.notFound(notFoundHandler);
 
-// Scheduled handler for cron triggers — runs for all active LINE accounts
-async function scheduled(
-  event: ScheduledEvent,
-  env: Env['Bindings'],
-  ctx: ExecutionContext,
-): Promise<void> {
-  // Get all active accounts from DB
-  const dbAccounts = await getLineAccounts(env.DB);
-
-  // Build LineClient map for insight fetching (keyed by account id)
-  const lineClients = new Map<string, LineClient>();
-  for (const account of dbAccounts) {
-    if (account.is_active) {
-      lineClients.set(account.id, new LineClient(account.channel_access_token));
-    }
-  }
-  const defaultLineClient = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
-
-  // 配信系は1回だけ実行（内部でfriendのline_account_idから正しいlineClientを動的解決）
-  // 以前はアカウントごとにループしていたが、アカウントフィルタなしのDBクエリで
-  // 全アカウントの配信が各ループで重複実行されていたバグを修正
-  // Phase 1: 復旧処理 (batch_offset=-1 → 0 にする軽量な UPDATE のみ) を queue 処理より
-  // 先に await 完了させる。これで stalled/stuck から復旧した配信が同じ cron tick の
-  // processQueuedBroadcasts に拾われ、復旧レイテンシが 1 tick 縮む。recover は inline 送信を
-  // 含まない高速処理なので、先に await しても他ジョブを starve させない。
-  const { recoverStalledBroadcasts, recoverStuckDeliveries } = await import('@line-crm/db');
-  await Promise.allSettled([
-    recoverStalledBroadcasts(env.DB),
-    recoverStuckDeliveries(env.DB),
-  ]);
-
-  // Booking / event-booking リマインドは時刻厳守 + 軽量 (数件/tick、上限100件) なので、
-  // 重い配信・insight ジョブより先に実行する。以前は最後に置かれていたため、
-  // 手前のジョブが invocation を止めると数時間分のリマインドが未送信のまま
-  // starts_at を過ぎ、「開始後は送らない」ガードで永久 pending になる事故が
-  // 発生した (2026-06-01 / 2026-06-15、計 10 件送り漏れ)。
-  // token refresh はリマインドより先に済ませる (失効直後トークンでの 401 送信を防ぐ。
-  // 旧順序では refresh が先だった invariant の維持)。
-  try {
-    await refreshLineAccessTokens(env.DB);
-  } catch (e) {
-    console.error('token refresh error:', e);
-  }
-
-  try {
-    const result = await processDueReminders(env.DB, {
-      now: new Date(),
-      sender: sendBookingNotification,
-      reminderHoursBefore: DEFAULT_ACCOUNT_SETTINGS.reminder_hours_before,
-    });
-    if (result.sent + result.failed > 0) {
-      console.log(`[booking-reminders] sent=${result.sent} failed=${result.failed}`);
-    }
-  } catch (e) {
-    console.error('booking-reminders error:', e);
-  }
-
-  try {
-    const result = await processDueEventReminders(env.DB, {
-      now: new Date(),
-      sender: sendEventBookingNotification,
-    });
-    if (result.sent + result.failed > 0) {
-      console.log(`[event-booking-reminders] sent=${result.sent} failed=${result.failed}`);
-    }
-  } catch (e) {
-    console.error('event-booking-reminders error:', e);
-  }
-
-  // 外部Google Calendarで確定したMeet個別相談。前日・1時間前のLINE通知を
-  // D1で管理し、送信は必ずL Harness Proxyを通す。
-  try {
-    const result = await processDueMeetConsultationReminders(env.DB, {
-      now: new Date(),
-      proxyBaseUrl:
-        env.WORKER_PUBLIC_URL ?? 'https://your-worker.your-subdomain.workers.dev',
-      proxyDispatch: (request) => Promise.resolve(lineProxy.fetch(request, env, ctx)),
-    });
-    if (result.sent + result.failed > 0) {
-      console.log(`[meet-consultation-reminders] sent=${result.sent} failed=${result.failed}`);
-    }
-  } catch (e) {
-    console.error('meet-consultation-reminders error:', e);
-  }
-
-  // ウェビナー予約リマインド (セッション選択メニュー)。時刻厳守・軽量なので
-  // booking 系リマインドと同じく重いジョブより先に実行する。
-  try {
-    const { processWebinarReminders } = await import('./services/webinar-reminders.js');
-    const liffMatch = /liff\.line\.me\/([^/?]+)/.exec(env.LIFF_URL ?? '');
-    const result = await processWebinarReminders(
-      env.DB,
-      {
-        proxyBaseUrl:
-          env.WORKER_PUBLIC_URL ?? 'https://your-worker.your-subdomain.workers.dev',
-        defaultAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN,
-        defaultLiffId: liffMatch?.[1] ?? null,
-        proxyDispatch: (request) => Promise.resolve(lineProxy.fetch(request, env, ctx)),
-      },
-    );
-    if (result.sent + result.failed > 0) {
-      console.log(`[webinar-reminders] sent=${result.sent} failed=${result.failed}`);
-    }
-  } catch (e) {
-    console.error('webinar-reminders error:', e);
-  }
-
-  // 予約画面の未予約、予約後の未視聴、フォーム途中離脱、回答後の相談未予約を
-  // 段階別に自動追客する。対象は followup config で有効化したウェビナーだけ。
-  try {
-    const { processWebinarFollowups } = await import('./services/webinar-followups.js');
-    const liffMatch = /liff\.line\.me\/([^/?]+)/.exec(env.LIFF_URL ?? '');
-    const result = await processWebinarFollowups(env.DB, {
-      proxyBaseUrl:
-        env.WORKER_PUBLIC_URL ?? 'https://your-worker.your-subdomain.workers.dev',
-      defaultAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN,
-      defaultLiffId: liffMatch?.[1] ?? null,
-      proxyDispatch: (request) => Promise.resolve(lineProxy.fetch(request, env, ctx)),
-    });
-    if (result.sent + result.failed > 0) {
-      console.log(`[webinar-followups] sent=${result.sent} failed=${result.failed}`);
-    }
-  } catch (e) {
-    console.error('webinar-followups error:', e);
-  }
-
-  // Phase 2: 配信系と定期ジョブを並列実行する。processScheduledBroadcasts は tag/all の
-  // inline 送信を含み時間がかかり得るため、queue 処理と並列にして互いを block しない
-  // (barrier 化すると長い scheduled 送信が queue 処理を待たせる)。scheduled dedup は
-  // status='sending', batch_offset=0 に enqueue され、同 tick もしくは次 tick (最大5分、
-  // 5分 cron の粒度内) で processQueuedBroadcasts に拾われて分割送信される。
-  const jobs = [];
-  jobs.push(
-    processStepDeliveries(env.DB, defaultLineClient, env.WORKER_URL),
-    processScheduledBroadcasts(env.DB, defaultLineClient, env.WORKER_URL),
-    processReminderDeliveries(env.DB, defaultLineClient),
-  );
-  jobs.push(processQueuedBroadcasts(env.DB, defaultLineClient, env.WORKER_URL));
-  jobs.push(checkAccountHealth(env.DB));
-
-  // Mileage is an eventually-consistent projection. Reuse the existing
-  // minute cron invocation, but drain only every five minutes and at most 100
-  // actions per batch so it adds no extra Cron Trigger and keeps D1 load flat.
-  if (
-    event.cron === '* * * * *'
-    && new Date(event.scheduledTime).getUTCMinutes() % 5 === 0
-  ) {
-    jobs.push(
-      processPendingMileageEvents(env.DB, { limit: 100 }).then((result) => {
-        if (result.claimed > 0) {
-          console.log(
-            `[mileage-queue] processed=${result.processed} failed=${result.failed} granted=${result.granted}`,
-          );
-        }
-      }),
-    );
-  }
-
-  await Promise.allSettled(jobs);
-
-  // Fetch broadcast insights (runs daily, self-throttled)
-  try {
-    await processInsightFetch(env.DB, lineClients, defaultLineClient);
-  } catch (e) {
-    console.error('Insight fetch error:', e);
-  }
-
-  // Booking expirer — runs only on the 6h cron tick.
-  if (event.cron === '0 */6 * * *') {
-    try {
-      const result = await enqueueFollowingMileageMilestones(env.DB, {
-        limitPerMilestone: 1000,
-      });
-      if (result.eventsCreated + result.queued > 0) {
-        console.log(
-          `[following-mileage] events=${result.eventsCreated} queued=${result.queued}`,
-        );
-      }
-    } catch (e) {
-      console.error('following-mileage error:', e);
-    }
-
-    try {
-      const result = await runExpirer(env.DB, {
-        now: new Date(),
-        sender: sendBookingNotification,
-      });
-      console.log(
-        `[booking-expirer] expired=${result.expired} idempotency_purged=${result.idempotencyPurged}`,
-      );
-    } catch (e) {
-      console.error('booking-expirer error:', e);
-    }
-
-    try {
-      const purged = await purgeExpiredWebhookEvents(env.DB, new Date());
-      console.log(`[webhook-event-dedup] purged=${purged}`);
-    } catch (e) {
-      console.error('webhook-event-dedup purge error:', e);
-    }
-  }
-
-  // Event-booking expirer — 6h cron tick.
-  if (event.cron === '0 */6 * * *') {
-    try {
-      const result = await runEventBookingExpirer(env.DB, { now: new Date() });
-      console.log(
-        `[event-booking-expirer] expired=${result.expired} idempotency_purged=${result.idempotencyPurged}`,
-      );
-    } catch (e) {
-      console.error('event-booking-expirer error:', e);
-    }
-  }
-
-  // Cross-account duplicate detection — disabled.
-  // The cron used to materialize duplicates into the tag system but the 1k-subrequest
-  // budget can't drain a 1k+ candidate backlog, and a live SELECT against
-  // friends.picture_url / display_name / status_message gives the same answer
-  // on demand. Replacement: a /api/duplicates endpoint plus a dashboard view
-  // (planned alongside the multi-provider UI work). Keeping the service file
-  // (apps/worker/src/services/duplicate-detect.ts) and the existing
-  // `重複:` tag rows untouched until that replacement lands.
-}
+// wrangler.toml の [[durable_objects.bindings]] class_name は同スクリプトからの
+// named export を解決するので、メインエントリである index.ts から再 export する
+// 必要がある（実装自体は durable-objects/tenant-scheduler.ts に置いてある）。
+export { TenantScheduler };
 
 export default {
   fetch: app.fetch,

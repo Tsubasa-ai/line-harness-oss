@@ -40,6 +40,7 @@ function env(overrides: Partial<Env['Bindings']> = {}): Env['Bindings'] {
     DB: {} as D1Database,
     IMAGES: {} as R2Bucket,
     ASSETS: {} as Fetcher,
+    TENANT_SCHEDULER: {} as Env['Bindings']['TENANT_SCHEDULER'],
     LINE_CHANNEL_SECRET: 'secret',
     LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
     API_KEY,
@@ -197,6 +198,43 @@ describe('successful SSO', () => {
       ADMIN_PUBLIC_URL: 'https://dashboard.example.test/',
     });
     expect(res.headers.get('Location')).toBe('https://dashboard.example.test');
+  });
+
+  // three-surfaces 統合（2026-08-24）の回帰防止: ADMIN_PUBLIC_URL が admin の basePath
+  // （例: /console）まで含む同一オリジン構成で、その basePath を落とさずリダイレクトすること。
+  // 落ちると「SSO 経由で入ると root（LIFF アプリ）に着地する」壊れ方になる。
+  test('preserves the admin basePath in ADMIN_PUBLIC_URL (three-surfaces layout)', async () => {
+    const res = await sso(await signAdminSsoToken(SECRET, payload()), {
+      ADMIN_ORIGIN: undefined,
+      ADMIN_PUBLIC_URL: 'https://tenant.example.test/console/',
+    });
+    expect(res.headers.get('Location')).toBe('https://tenant.example.test/console');
+  });
+
+  // codex review round 1 指摘: ADMIN_ORIGIN allowlist が設定済み（旧経路の名残・または
+  // 明示設定）でも、それが ADMIN_PUBLIC_URL と同一オリジンを指すなら（three-surfaces
+  // 統合後の同一オリジン構成）、origin だけの allowlist 値ではなく basePath 込みの
+  // ADMIN_PUBLIC_URL を優先しないと、SSO 経由のログインが admin ではなく root
+  // （LIFF アプリ）へ着地してしまう。
+  test('prefers ADMIN_PUBLIC_URL over a same-origin ADMIN_ORIGIN allowlist entry (keeps the basePath)', async () => {
+    const res = await sso(await signAdminSsoToken(SECRET, payload()), {
+      ADMIN_ORIGIN: 'https://tenant.example.test',
+      ADMIN_PUBLIC_URL: 'https://tenant.example.test/console',
+    });
+    expect(res.headers.get('Location')).toBe('https://tenant.example.test/console');
+  });
+
+  // 逆方向の回帰防止: ADMIN_ORIGIN が ADMIN_PUBLIC_URL と別オリジン（旧経路の本来の想定
+  // — admin が別の CF Pages プロジェクト）なら、basePath 混入を試みず allowlist の
+  // origin をそのまま使う。
+  test('keeps using the allowlisted origin when ADMIN_ORIGIN differs from ADMIN_PUBLIC_URL (legacy separate-Pages topology)', async () => {
+    const res = await sso(await signAdminSsoToken(SECRET, payload()), {
+      ADMIN_ORIGIN: 'https://admin-legacy.pages.dev',
+      WORKER_URL: 'https://api.workers.dev',
+      ADMIN_ALLOW_CROSS_SITE: 'true', // separate-origin admin is inherently cross-site
+      ADMIN_PUBLIC_URL: 'https://tenant.example.test/console',
+    });
+    expect(res.headers.get('Location')).toBe('https://admin-legacy.pages.dev');
   });
 
   test('the redirect target is never taken from the request (no open redirect)', async () => {

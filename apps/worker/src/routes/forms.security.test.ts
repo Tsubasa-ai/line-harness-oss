@@ -25,6 +25,9 @@ vi.mock('@line-crm/db', () => ({
   getTrackedLinkById: vi.fn(),
   getMessageTemplateById: vi.fn(),
   getLineAccountById: mocks.getLineAccountById,
+  // フォームの公開 URL（formUrl）組み立てに使う。既定は「1本に決まらない」= null で、
+  // その場合 formUrl も null になる（LIFF 未構成テナントと同じ扱い）。
+  resolveDefaultLineAccount: vi.fn(async () => null),
   enrollFriendInScenario: vi.fn(),
   jstNow: vi.fn(() => '2026-08-04T12:00:00+09:00'),
 }));

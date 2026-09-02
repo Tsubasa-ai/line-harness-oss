@@ -1,8 +1,15 @@
 import { extname } from 'node:path';
-import { blake3 } from '@noble/hashes/blake3.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
 import type { CfApiCreds } from '../types.js';
 import { authHeader, throwHttpError, workersApiBase } from './_shared.js';
+import { hashWorkerAsset, normalizeAssetPath } from './asset-hash.js';
+
+// hashWorkerAsset/normalizeAssetPath now live in ./asset-hash.ts (the
+// canonical, dependency-free implementation) so the WfP release-bundle
+// builder (line-harness `scripts/release/build-wfp-bundle.ts`) can import the
+// exact same hashing code without pulling in this file's fetch-based upload
+// flow. Re-exported here so existing imports of `hashWorkerAsset` from
+// `assets.js` keep working.
+export { hashWorkerAsset, normalizeAssetPath };
 
 interface AssetManifestEntry {
   hash: string;
@@ -95,24 +102,6 @@ export async function uploadWorkerAssets(opts: {
 
   if (!completionJwt) throw new Error('worker assets upload returned no completion JWT');
   return completionJwt;
-}
-
-/** Cloudflare/Wrangler Workers Assets hash: BLAKE3(base64(bytes)+extension). */
-export function hashWorkerAsset(path: string, content: Buffer): string {
-  const extension = extname(path).slice(1);
-  const input = new TextEncoder().encode(content.toString('base64') + extension);
-  return bytesToHex(blake3(input)).slice(0, 32);
-}
-
-function normalizeAssetPath(path: string): string {
-  const normalized = path.replaceAll('\\', '/').replace(/^\.\//, '').replace(/^\/+/, '');
-  if (!normalized || normalized.split('/').includes('..')) {
-    throw new Error(`invalid Workers Asset path: ${path}`);
-  }
-  // Cloudflare's Workers Assets upload-session API requires every manifest
-  // key to be an absolute URL path. Bundle entries are stored relative to
-  // worker-assets/, so add the leading slash only at the API boundary.
-  return `/${normalized}`;
 }
 
 function contentTypeFor(path: string): string {

@@ -3,7 +3,6 @@ import { consumeAdminSsoJti } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { adminSessionCookie, csrfCookie } from '../middleware/auth.js';
 import {
-  normalizeOrigin,
   parseAllowedOrigins,
   resolveAdminAuthConfig,
 } from '../middleware/admin-auth-config.js';
@@ -48,7 +47,40 @@ function sanitizeForLog(value: string | undefined): string {
  */
 function adminHomeUrl(env: Env['Bindings']): string {
   const [firstAllowedOrigin] = parseAllowedOrigins(env);
-  return firstAllowedOrigin ?? normalizeOrigin(env.ADMIN_PUBLIC_URL) ?? '/';
+  const adminPublicUrl = normalizeAdminPublicUrl(env.ADMIN_PUBLIC_URL);
+  if (firstAllowedOrigin) {
+    // ADMIN_ORIGIN allowlist を明示設定している運用（旧経路: admin が別オリジンの
+    // CF Pages プロジェクト）でも、ADMIN_PUBLIC_URL がたまたま同じオリジンを指す場合
+    // （admin が同一オリジンのサブパスに載る構成で、この allowlist を同一オリジンに向けて
+    // 明示設定するケース）は、origin だけの firstAllowedOrigin ではなく basePath 込みの
+    // ADMIN_PUBLIC_URL を優先する — でないと admin ではなく root（LIFF アプリ）へ
+    // リダイレクトしてしまう。オリジンが違う（本来の想定である別 Pages オリジン）なら
+    // 従来どおり allowlist の origin をそのまま使う。
+    if (adminPublicUrl && new URL(adminPublicUrl).origin === firstAllowedOrigin) {
+      return adminPublicUrl;
+    }
+    return firstAllowedOrigin;
+  }
+  return adminPublicUrl ?? '/';
+}
+
+/**
+ * `ADMIN_PUBLIC_URL` をリダイレクト先として正規化する。`normalizeOrigin`（CORS の
+ * Origin ヘッダ比較用、admin-auth-config.ts）とはあえて別関数にしてある —
+ * ブラウザが送る Origin ヘッダは常にスキーム+ホストのみなので CORS 判定は origin だけで
+ * 正しいが、こちらは「実際にどこへ飛ばすか」なので、パスまで保持しないと three-surfaces
+ * 統合後の admin basePath（例: `/console` — 配布ビルドが宣言した値）に戻れなくなる。
+ * ルートパス（`/`）は従来どおり origin だけに畳む — 末尾スラッシュの有無で別の文字列になる事故を防ぐ。
+ */
+function normalizeAdminPublicUrl(value: string | undefined | null): string | null {
+  if (!value) return null;
+  try {
+    const u = new URL(value);
+    const path = u.pathname === '/' ? '' : u.pathname.replace(/\/+$/, '');
+    return `${u.origin}${path}`;
+  } catch {
+    return null;
+  }
 }
 
 function page(title: string, message: string): string {

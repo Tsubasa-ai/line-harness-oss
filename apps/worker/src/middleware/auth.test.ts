@@ -21,6 +21,7 @@ function env(overrides: Partial<Env['Bindings']> = {}): Env['Bindings'] {
     DB: {} as D1Database,
     IMAGES: {} as R2Bucket,
     ASSETS: {} as Fetcher,
+    TENANT_SCHEDULER: {} as Env['Bindings']['TENANT_SCHEDULER'],
     LINE_CHANNEL_SECRET: 'secret',
     LINE_CHANNEL_ACCESS_TOKEN: 'line-token',
     API_KEY: 'env-key',

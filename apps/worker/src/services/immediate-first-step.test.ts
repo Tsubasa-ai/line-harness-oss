@@ -27,6 +27,10 @@ const dbMocks = vi.hoisted(() => ({
   enrollFriendInScenario: vi.fn(),
   getLineAccountByChannelId: vi.fn(),
   getLineAccountById: vi.fn(),
+  // 既定は env をそのまま返す（＝従来挙動）。テナントに有効なアカウントが1本
+  // しか無いときだけ line_accounts を正とする実装の、単体テスト側のスタブ。
+  // 既定は「1本に決まらない」= null（＝従来どおり env / 既存の解決に委ねる）。
+  resolveDefaultLineAccount: vi.fn(async () => null),
   addTagToFriend: vi.fn(),
   jstNow: vi.fn(),
   toJstString: vi.fn(),

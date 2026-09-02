@@ -11,6 +11,7 @@ import {
   createChat,
   getFriendById,
   getLineAccountById,
+  resolveDefaultAccessToken,
   updateChat,
   jstNow,
 } from '@line-crm/db';
@@ -100,23 +101,28 @@ async function resolveOrCreateChat(db: D1Database, id: string): Promise<ChatLike
     .first<ChatLike>())!;
 }
 
+/**
+ * `envAccessToken` は「最後の砦」であって既定値ではない —
+ * `resolveDefaultAccessToken` の doc comment を参照。friend にアカウントが
+ * 紐付いていなくても、テナントに有効なアカウントが1本しか無ければそれを使う。
+ */
 async function resolveFriendAndAccessToken(
   db: D1Database,
   friendId: string,
-  defaultAccessToken: string,
+  envAccessToken: string,
 ) {
   const friend = await getFriendById(db, friendId);
   if (!friend) {
-    return { friend: null, accessToken: defaultAccessToken };
+    return { friend: null, accessToken: await resolveDefaultAccessToken(db, envAccessToken) };
   }
 
   if (!friend.line_account_id) {
-    return { friend, accessToken: defaultAccessToken };
+    return { friend, accessToken: await resolveDefaultAccessToken(db, envAccessToken) };
   }
 
   const account = await getLineAccountById(db, friend.line_account_id);
   if (!account) {
-    return { friend, accessToken: defaultAccessToken };
+    return { friend, accessToken: await resolveDefaultAccessToken(db, envAccessToken) };
   }
 
   return { friend, accessToken: account.channel_access_token };

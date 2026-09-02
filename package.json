@@ -1,6 +1,6 @@
 {
   "name": "line-oss-crm",
-  "version": "0.22.0",
+  "version": "0.24.0",
   "private": true,
   "description": "Open-source LINE Official Account CRM/marketing automation",
   "homepage": "https://the-harness.com/line-harness/",
@@ -27,7 +27,8 @@
     "deploy:update": "node packages/create-line-harness/dist/index.js update",
     "sandbox:create-line-harness": "bash scripts/run-create-line-harness-sandbox.sh",
     "test:scripts": "vitest run --config vitest.config.ts",
-    "build:bundle": "tsx scripts/release/build-bundle.ts"
+    "build:bundle": "tsx scripts/release/build-bundle.ts",
+    "build:wfp-bundle": "tsx scripts/release/build-wfp-bundle.ts"
   },
   "packageManager": "pnpm@9.15.4",
   "engines": {

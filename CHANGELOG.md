@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.23.2 (2026-09-02)
+
+### D1ヘルスログのrows_read超過
+
+- v0.23.1で追加した最新ヘルス状態の参照が、履歴の多い環境で
+  `account_health_logs`を広く読み取る問題を修正
+- `(line_account_id, created_at DESC)`の複合インデックスと既存環境向け
+  migration 072を追加。古いヘルス履歴を削除せずに更新可能
+- sandbox D1の10,000件履歴で、最新1件クエリのrows_readが20,000から1へ
+  減ることを確認
+
+### その他の修正
+
+- リッチメニュー切替postbackをシステム通知としてチャット履歴へ表示
+- L Harnessのfaviconを追加
+
+## v0.23.1 (2026-08-27)
+
+### 管理画面ログイン 405（v0.23.0 回帰）
+
+- 公式bundleから更新した通常版の管理画面が、Worker APIではなくCloudflare Pages自身へ
+  `POST /api/auth/login`を送り、405でログインできなくなる問題を修正
+- 通常版の`worker-origin`とCloud共有ビルドの`same-origin`を明示的に分離し、
+  URLプレースホルダーの置換結果から構成を推測しないよう変更
+- v0.23.0の二重置換、通常版の未置換設定、Cloud版の同一オリジン設定に回帰テストを追加
+
+### その他の修正
+
+- 5分cronのみの環境でも5分ごとの定期処理が確実に動作するよう修正
+- ヘルスチェックの不要な毎分ログ書き込みを停止
+- 管理画面のチャット入力欄のはみ出しとFlexメッセージのプレビュー崩れを修正
+
 ## Brand name update (2026-08-19)
 
 - Public product display name changed from the former name to **L Harness**.

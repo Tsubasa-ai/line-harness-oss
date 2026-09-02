@@ -1,4 +1,5 @@
 import { describe, expect, test, beforeEach, vi } from 'vitest';
+import { Hono } from 'hono';
 
 const dbMocks = {
   getWebinars: vi.fn(),
@@ -93,6 +94,24 @@ const execCtx = { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unkno
 
 function req(path: string, init?: RequestInit) {
   return webinarRoutes.request(path, init, env, execCtx);
+}
+
+// PUT /api/webinars/:id now carries requireRole('owner', 'admin') (final
+// review finding: it was the one route that could still publish a bogus
+// videoPrefix without going through POST .../video's completeness check).
+// That guard reads c.get('staff'), which only the app-level authMiddleware
+// (mounted in index.ts) sets in production — calling webinarRoutes.request()
+// directly bypasses it. Wrap in a minimal app that seeds a staff context,
+// matching the pattern in webinars-upload.test.ts.
+type TestEnv = { Variables: { staff: { id: string; role: 'owner' | 'admin' | 'staff' } } };
+function reqAsStaff(path: string, init?: RequestInit, role: 'owner' | 'admin' | 'staff' = 'owner') {
+  const app = new Hono<TestEnv>();
+  app.use('*', async (c, next) => {
+    c.set('staff', { id: 'staff-1', role });
+    await next();
+  });
+  app.route('/', webinarRoutes);
+  return app.request(path, init, env, execCtx);
 }
 
 beforeEach(() => {
@@ -780,7 +799,7 @@ describe('admin CRUD', () => {
     // beforeEach は slug 既存の mock を入れているので、新規作成用に null に戻す
     dbMocks.getWebinarBySlug.mockResolvedValue(null);
     dbMocks.createWebinar.mockResolvedValue(makeWebinar());
-    const res = await req('/api/webinars', {
+    const res = await reqAsStaff('/api/webinars', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -801,16 +820,40 @@ describe('admin CRUD', () => {
 
   test('POST — title/slug 欠落・slug 形式違反は 400', async () => {
     dbMocks.getWebinarBySlug.mockResolvedValue(null);
-    const noTitle = await req('/api/webinars', {
+    const noTitle = await reqAsStaff('/api/webinars', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slug: 'x' }),
     });
     expect(noTitle.status).toBe(400);
-    const badSlug = await req('/api/webinars', {
+    const badSlug = await reqAsStaff('/api/webinars', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 't', slug: 'Bad Slug!' }),
     });
     expect(badSlug.status).toBe(400);
+  });
+
+  // Regression: POST /api/webinars was the one door requireRole('owner',
+  // 'admin') was not applied to. A staff key could create a webinar with an
+  // arbitrary videoPrefix and status: 'active' directly, reaching the same
+  // end state that PUT /api/webinars/:id's guard (see the test above) closed
+  // off — bypassing POST .../video's completeness check entirely.
+  test('POST /api/webinars — staff ロールは 403 (videoPrefix を直接指定して作成できてはいけない)', async () => {
+    dbMocks.getWebinarBySlug.mockResolvedValue(null);
+    const res = await reqAsStaff(
+      '/api/webinars',
+      {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'テストウェビナー',
+          slug: 'test-webinar',
+          videoPrefix: 'rich-menu-images/whatever',
+          status: 'active',
+        }),
+      },
+      'staff',
+    );
+    expect(res.status).toBe(403);
+    expect(dbMocks.createWebinar).not.toHaveBeenCalled();
   });
 
   test('PUT /api/webinars/:id/comments — 一括置換', async () => {
@@ -965,11 +1008,25 @@ describe('admin CRUD', () => {
 
   test('PUT /api/webinars/:id — 空 title は 400 で updateWebinar が呼ばれない', async () => {
     dbMocks.getWebinarById.mockResolvedValue(makeWebinar());
-    const res = await req('/api/webinars/w1', {
+    const res = await reqAsStaff('/api/webinars/w1', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: '  ' }),
     });
     expect(res.status).toBe(400);
+    expect(dbMocks.updateWebinar).not.toHaveBeenCalled();
+  });
+
+  test('PUT /api/webinars/:id — staff ロールは 403 (videoPrefix を直接書き換えて完全性チェックを迂回できてはいけない)', async () => {
+    dbMocks.getWebinarById.mockResolvedValue(makeWebinar());
+    const res = await reqAsStaff(
+      '/api/webinars/w1',
+      {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoPrefix: 'rich-menu-images/whatever' }),
+      },
+      'staff',
+    );
+    expect(res.status).toBe(403);
     expect(dbMocks.updateWebinar).not.toHaveBeenCalled();
   });
 });
