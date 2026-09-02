@@ -1,4 +1,4 @@
-// Broadcast template variables are expanded by LINE Harness before calling
+// Broadcast template variables are expanded by L Harness before calling
 // the Messaging API. LINE's official textV2.substitution supports mentions
 // and LINE emoji only; it does not provide arbitrary recipient-name strings.
 export const SUPPORTED_BROADCAST_VARIABLES = new Set(['name', 'liff_id']);
