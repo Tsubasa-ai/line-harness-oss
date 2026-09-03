@@ -29,3 +29,9 @@ apps/worker/dist/
 
 # Claude Code local dev-server config (machine-local paths)
 .claude/launch.json
+
+# D1 の本番ダンプ (wrangler d1 export の出力)。友だち名・LINEユーザーID・
+# メッセージ履歴といった実顧客データを含むため、このリポジトリは public で
+# ある以上ワークツリーに置いても絶対にコミットしない。
+line-harness-before-*.sql
+*-d1-export*.sql
