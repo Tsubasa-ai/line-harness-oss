@@ -2,6 +2,7 @@ import type { Context, Next } from 'hono';
 import { getStaffByApiKey } from '@line-crm/db';
 import type { Env } from '../index.js';
 import type { AdminSameSite } from './admin-auth-config.js';
+import { safeDecode } from '../utils/safe-decode.js';
 
 export const ADMIN_AUTH_COOKIE = 'lh_admin_session';
 export const CSRF_COOKIE = 'lh_csrf';
@@ -11,19 +12,6 @@ export const CSRF_HEADER = 'x-csrf-token';
 const SESSION_MAX_AGE = 604800;
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/**
- * decodeURIComponent throws on malformed percent escapes (e.g. `%`). Cookie
- * headers are client-controlled, so fall back to the raw value rather than
- * letting the exception turn a request into a 500.
- */
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
 
 function parseCookieHeader(cookieHeader: string | undefined): Record<string, string> {
   if (!cookieHeader) return {};
@@ -201,8 +189,12 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/integrations/stripe/webhook' ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path === '/api/meet-callback' || // Meet Harness completion callback
+    // Google OAuth redirects without admin headers. Route verifies a signed, expiring state.
+    (path === '/api/booking/google-calendar/oauth/callback' && method === 'GET') ||
     path === '/api/qr' || // Public QR proxy — used by desktop landing pages
-    path === '/api/health' // Liveness probe (update CLI / self-update verify)
+    path === '/api/health' || // Liveness probe (update CLI / self-update verify)
+    // Public lead form. Origin validation and field validation happen in-route.
+    (path === '/api/public/media-inquiries' && method === 'POST')
   ) {
     return next();
   }
