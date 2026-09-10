@@ -9,13 +9,35 @@
 > ### **[LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)** 👈
 
 LINE 公式アカウントの完全オープンソース CRM。**L社 / U社 の無料代替**。
-Cloudflare 無料枠で動く。サーバー代 **0 円**。Claude Code から全操作可能。
+L Harness本体のソフトウェア利用料は **0円** です。LINE公式アカウントの配信料金、Cloudflareの契約・利用量、独自ドメイン、導入・保守、接続する外部AIサービスの費用は別です。Claude CodeからMCP経由で操作できます。
+
+費用の条件は[開発元の公式料金説明](https://the-harness.com/line-harness/pricing/)で確認できます。[Cloudflare D1の無料プラン](https://developers.cloudflare.com/d1/platform/pricing/)は日次の読み書き上限に達するとクエリがエラーになり、有料プランの超過課金とは挙動が異なります。外部AIを接続する場合は、たとえば[Claudeのプラン・API料金](https://claude.com/pricing)を別に確認してください（2026年9月6日確認）。
 
 ### ▶️ [動画で見る (YouTube・約20分)](https://youtu.be/DiRuGaeq1sM)
 
 [![クリックで YouTube を再生 — L Harness 導入の全手順](https://img.youtube.com/vi/DiRuGaeq1sM/maxresdefault.jpg)](https://youtu.be/DiRuGaeq1sM)
 
 **現バージョン**: v0.21.0 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
+
+---
+
+## プラグインマーケット β
+
+**その数行を、あなたのプラグインに。** 配信ルール・自動処理・外部サービス連携を、本体とは別のリポジトリ・Workerへ切り出せます。本体更新による独自コードの上書きを避けながら、SDKを通じて機能を拡張します。
+
+管理画面の「プラグインマーケット」から拡張と開発リソースを探せます。β版は導入ガイド付きのカタログで、各プラグインを個別にセットアップする方式です。
+
+- [開発ガイド・ひな形の作成](docs/plugins/README.md)
+- [公式プラグイン第1弾：条件タグ付け](examples/plugins/tag-rules/README.md)
+- [マーケットへの掲載申請](https://github.com/Shudesu/line-harness-oss/issues/new?template=plugin-submission.yml)
+- [アップデートニュース原稿](docs/release-notes/plugin-market-beta.md)
+
+```bash
+# 本体リポジトリのルートで実行（Node.js 22以上）
+pnpm plugin:create ../my-plugin
+```
+
+独自ソースが上書きされないことと、API互換性は別です。本体・SDKを更新するときは、テスト環境で接続を確認してください。
 
 ---
 
@@ -43,7 +65,7 @@ L Harnessの表示名、開発者、運営法人、公開コード、研究資�
 
 | | L社 | U社 | **L Harness** |
 |---|---|---|---|
-| 月額 | 2万円〜 | 1万円〜 | **0円** |
+| 月額 | 2万円〜 | 1万円〜 | **0円（ソフトウェア利用料）** |
 | ステップ配信 | ✅ | ✅ | ✅ |
 | セグメント配信 | ✅ | ✅ | ✅ |
 | リッチメニュー切替 | ✅ | ✅ | ✅ |
