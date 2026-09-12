@@ -1,3 +1,4 @@
+import { BroadcastDeliveryError } from '../services/broadcast-delivery-error.js';
 import { Hono } from 'hono';
 import {
   getBroadcasts,
@@ -9,6 +10,7 @@ import {
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
 import { processBroadcastSend, buildMessage, processQueuedBroadcasts } from '../services/broadcast.js';
+import { BroadcastSenderError, resolveBroadcastSender } from '../services/broadcast-sender.js';
 import { LinePlanQuotaError } from '../services/quota-alert.js';
 import {
   getQuotaUsage,
@@ -16,7 +18,6 @@ import {
   estimateSendAudience,
   personalizedAudienceFilter,
   personalizedAudienceCount,
-  queuedTagAudienceCount,
   quotaConfig,
   monthStartJst,
 } from '../services/quota.js';
@@ -209,15 +210,7 @@ broadcasts.get('/api/broadcasts/:id/preview-count', async (c) => {
       count = active;
       perAccount = breakdown;
     } else if (broadcast.target_type === 'tag' && broadcast.target_tag_id) {
-      // 注: ここは inline send パス (broadcast.ts:61 getFriendsByTag) が
-      // line_account_id でフィルタしないので、preview もアカウント横断で数える。
-      // 実際の送信先と modal 表示を一致させるための整合性。
-      const row = await c.env.DB.prepare(
-        `SELECT COUNT(*) AS cnt FROM friends f
-           INNER JOIN friend_tags ft ON ft.friend_id = f.id
-           WHERE ft.tag_id = ? AND f.is_following = 1`,
-      ).bind(broadcast.target_tag_id).first<{ cnt: number }>();
-      count = row?.cnt ?? 0;
+      count = (await estimateSendAudience(c.env.DB, broadcast)) ?? 0;
     } else if (broadcast.target_type === 'all') {
       const accountId = (raw.line_account_id as string | null) || null;
       const sql = accountId
@@ -585,6 +578,13 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
       return c.json({ success: false, error: 'Broadcast not found' }, 404);
     }
 
+    if (existing.status !== 'draft' && existing.status !== 'scheduled') {
+      return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 409);
+    }
+    const lineClient = await resolveBroadcastSender(
+      c.env.DB, existing, new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN),
+    );
+
     const variableError = unsupportedVariablesError(existing.message_content);
     if (variableError) {
       return c.json({ success: false, error: variableError }, 400);
@@ -599,31 +599,11 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     // Also refuse when the projected total would cross the monthly limit, so
     // one big send just under the limit cannot overshoot it wholesale.
     //
-    // The personalized branch below is exempt from this generic estimate: its
-    // queued per-recipient send filters by the broadcast's account, while the
-    // generic tag estimate is deliberately unfiltered (it mirrors the
-    // non-personalized getFriendsByTag path). Judging a personalized
-    // account-bound tag send by the unfiltered count would over-estimate and
-    // refuse sends that actually fit — the branch applies the same refusal
-    // with its own exact audience count instead.
+    // Personalized delivery additionally validates missing recipient names below.
     const personalizedSend = hasRecipientVariables(existing.message_content)
       && existing.target_type !== 'multi-account-dedup';
     if (!personalizedSend && quota.monthlyMessages.max > 0) {
-      let estimate = await estimateSendAudience(c.env.DB, existing);
-      // A tag send with more than 500 following members — the same threshold
-      // this route uses below to switch to the queued path — is delivered by
-      // the queue executor via a tag marker: NO is_following rule, and the
-      // broadcast's account filter only when one is set. Judge those by that
-      // exact population (queuedTagAudienceCount mirrors both variants);
-      // smaller tag sends stay inline via getFriendsByTag (unfiltered,
-      // following only), which the generic estimate above already mirrors.
-      if (
-        existing.target_type === 'tag'
-        && estimate !== null
-        && estimate > 500
-      ) {
-        estimate = await queuedTagAudienceCount(c.env.DB, existing);
-      }
+      const estimate = await estimateSendAudience(c.env.DB, existing);
       if (wouldExceedMonthlyQuota(quota, estimate)) {
         return c.json({ success: false, error: 'quota_exceeded', quota }, 403);
       }
@@ -780,12 +760,12 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     // target_type='tag' で対象が多い場合はキュー方式
     if (existing.target_type === 'tag' && existing.target_tag_id) {
       const { getFriendsByTag } = await import('@line-crm/db');
-      const friends = await getFriendsByTag(c.env.DB, existing.target_tag_id);
+      const friends = await getFriendsByTag(c.env.DB, existing.target_tag_id, existing.line_account_id);
       const followingCount = friends.filter(f => f.is_following).length;
 
       if (followingCount > 500) {
         // Atomic lock: status='draft'|'scheduled' のときだけ status='sending' に遷移
-        const tagMarker = JSON.stringify({ operator: 'AND', rules: [{ type: 'tag_exists', value: existing.target_tag_id }] });
+        const tagMarker = JSON.stringify({ operator: 'AND', rules: [{ type: 'is_following', value: true }, { type: 'tag_exists', value: existing.target_tag_id }] });
         const lockResult = await c.env.DB.prepare(
           `UPDATE broadcasts SET status = 'sending', batch_offset = 0, segment_conditions = ? WHERE id = ? AND status IN ('draft','scheduled')`
         ).bind(tagMarker, id).run();
@@ -800,14 +780,6 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     // 500人以下またはtarget_type='all'は即時送信
     // accessToken 解決は lock 前に行う (setup 失敗時に status='sending' で stuck しないため、
     // 即時送信パスには recoverStalledBroadcasts がない)
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const broadcastAccountId = (existing as unknown as Record<string, unknown>).line_account_id;
-    if (broadcastAccountId) {
-      const { getLineAccountById } = await import('@line-crm/db');
-      const account = await getLineAccountById(c.env.DB, broadcastAccountId as string);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
 
     // atomic lock — 'draft' と 'scheduled' を分けて単一 UPDATE で claim する。
     // 各 UPDATE は単一 write statement なので read-then-write transaction の
@@ -837,6 +809,7 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     try {
       await processBroadcastSend(c.env.DB, lineClient, id, c.env.WORKER_URL);
     } catch (err) {
+      if (err instanceof BroadcastDeliveryError) throw err;
       await c.env.DB.prepare(
         `UPDATE broadcasts SET status = ? WHERE id = ? AND status = 'sending'`
       ).bind(claimedStatus, id).run();
@@ -846,6 +819,8 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
     const result = await getBroadcastById(c.env.DB, id);
     return c.json({ success: true, data: result ? serializeBroadcast(result) : null });
   } catch (err) {
+    if (err instanceof BroadcastDeliveryError) return c.json({ success: false, error: err.message }, 502);
+    if (err instanceof BroadcastSenderError) return c.json({ success: false, error: err.message }, 400);
     // LINE プランのクォータ不足ガード (services/broadcast.ts) の typed error。
     // オペレーターには 500 ではなく理由を返す (詳細は broadcasts.last_error にも
     // 記録済み)。
@@ -875,6 +850,13 @@ broadcasts.post('/api/broadcasts/:id/send-segment', async (c) => {
         400,
       );
     }
+
+    if (existing.status !== 'draft' && existing.status !== 'scheduled') {
+      return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 409);
+    }
+    await resolveBroadcastSender(
+      c.env.DB, existing, new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN),
+    );
 
     const variableError = unsupportedVariablesError(existing.message_content);
     if (variableError) {
@@ -939,6 +921,8 @@ broadcasts.post('/api/broadcasts/:id/send-segment', async (c) => {
     const result = await getBroadcastById(c.env.DB, id);
     return c.json({ success: true, data: result ? serializeBroadcast(result) : null, queued: true, message: 'Broadcast queued for batch processing by Cron' }, 202);
   } catch (err) {
+    if (err instanceof BroadcastDeliveryError) return c.json({ success: false, error: err.message }, 502);
+    if (err instanceof BroadcastSenderError) return c.json({ success: false, error: err.message }, 400);
     console.error('POST /api/broadcasts/:id/send-segment error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
@@ -1183,7 +1167,10 @@ broadcasts.post('/api/broadcasts/:id/test-send', async (c) => {
     let tracked = { messageType: broadcast.message_type as string, content: messageContent };
     if (broadcast.track_links !== 0) {
       const { autoTrackContent } = await import('../services/auto-track.js');
-      tracked = await autoTrackContent(c.env.DB, broadcast.message_type, messageContent, c.env.WORKER_URL, {
+      // Self-hosted installs may omit WORKER_URL. Use the request URL, never
+      // the caller-controlled Origin header, for the Worker's tracking base.
+      const trackWorkerUrl = c.env.WORKER_URL || new URL(c.req.url).origin;
+      tracked = await autoTrackContent(c.env.DB, broadcast.message_type, messageContent, trackWorkerUrl, {
         lineAccountId: accountId,
       });
     }
@@ -1256,7 +1243,7 @@ broadcasts.post('/api/segments/count', async (c) => {
       accountBindings.unshift(body.accountId);
     }
 
-    const countSql = accountSql.replace(/^SELECT .+ FROM/, 'SELECT COUNT(*) as count FROM');
+    const countSql = `SELECT COUNT(*) as count FROM (${accountSql}) audience`;
     const result = await c.env.DB.prepare(countSql).bind(...accountBindings).first<{ count: number }>();
 
     return c.json({ success: true, count: result?.count ?? 0 });
