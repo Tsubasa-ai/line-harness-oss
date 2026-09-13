@@ -14,7 +14,6 @@ import {
   applyScoring,
   getActiveAutomationsByEvent,
   createAutomationLog,
-  addTagToFriend,
   removeTagFromFriend,
   enrollFriendInScenario,
   jstNow,
@@ -23,6 +22,14 @@ import {
 import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { sendAdConversions } from './ad-conversion.js';
+import { keywordMatches } from './keyword-match.js';
+import {
+  claimTagEffects,
+  createTagAutomationDispatch,
+  resolveTagEventAccount,
+  tagChangeKey,
+  type TagAutomationDispatch,
+} from './tag-automation-context.js';
 
 export interface EventPayload {
   friendId?: string;
@@ -47,7 +54,23 @@ export async function fireEvent(
   payload: EventPayload,
   lineAccessToken?: string,
   lineAccountId?: string | null,
+  dispatch: TagAutomationDispatch = createTagAutomationDispatch(),
 ): Promise<void> {
+  if (eventType === 'tag_change' && payload.friendId) {
+    const tagId = payload.eventData?.tagId;
+    const action = payload.eventData?.action;
+    if (typeof tagId === 'string' && typeof action === 'string') {
+      const key = tagChangeKey(payload.friendId, tagId, action);
+      if (dispatch.events.has(key)) return;
+      // Manual tag requests reach the event bus without the automatic helper;
+      // include their initial mutation so a remove/add automation cannot repeat it.
+      claimTagEffects(dispatch, key);
+      dispatch.events.add(key);
+    }
+    const account = await resolveTagEventAccount(db, payload.friendId, lineAccountId);
+    lineAccessToken = account.accessToken;
+    lineAccountId = account.accountId;
+  }
   // Phase 1: fire webhooks, apply scoring rules, and ad conversion postback concurrently.
   const phase1: Promise<unknown>[] = [
     fireOutgoingWebhooks(db, eventType, payload),
@@ -72,7 +95,7 @@ export async function fireEvent(
     : payload;
 
   // Phase 2: evaluate automations.
-  await processAutomations(db, eventType, enrichedPayload, lineAccessToken, lineAccountId);
+  await processAutomations(db, eventType, enrichedPayload, lineAccessToken, lineAccountId, dispatch);
 }
 
 /**
@@ -155,12 +178,13 @@ async function processAutomations(
   payload: EventPayload,
   lineAccessToken?: string,
   lineAccountId?: string | null,
+  dispatch: TagAutomationDispatch = createTagAutomationDispatch(),
 ): Promise<void> {
   try {
     const allAutomations = await getActiveAutomationsByEvent(db, eventType);
     // Filter by account: match this account's automations + unassigned (backward compat)
     const automations = allAutomations.filter(
-      (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
+      (a) => !a.line_account_id || a.line_account_id === lineAccountId || (eventType !== 'tag_change' && !lineAccountId),
     );
 
     for (const automation of automations) {
@@ -168,13 +192,13 @@ async function processAutomations(
       const actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
-      if (!matchConditions(conditions, payload)) continue;
+      if (!matchConditions(conditions, payload, eventType)) continue;
 
       const results: Array<{ action: string; success: boolean; error?: string }> = [];
 
       for (const action of actions) {
         try {
-          await executeAction(db, action, payload, lineAccessToken, lineAccountId);
+          await executeAction(db, action, payload, lineAccessToken, lineAccountId, dispatch);
           results.push({ action: action.type, success: true });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -202,6 +226,7 @@ async function processAutomations(
 function matchConditions(
   conditions: Record<string, unknown>,
   payload: EventPayload,
+  eventType: string,
 ): boolean {
   // 条件が空 → 常にマッチ
   if (Object.keys(conditions).length === 0) return true;
@@ -222,16 +247,20 @@ function matchConditions(
   // keyword チェック（message_received / postback_received イベント用）
   if (conditions.keyword !== undefined && payload.eventData) {
     const text = payload.eventData.text as string | undefined;
-    if (!text || !text.includes(conditions.keyword as string)) return false;
+    if (!text) return false;
+    // Only human message text shares auto-reply/inbox normalization. Postback
+    // data is opaque, and event payloads/logs must retain the original input.
+    if (eventType === 'message_received' && typeof conditions.keyword === 'string') {
+      if (!keywordMatches({ keyword: conditions.keyword, match_type: 'contains' }, text, { normalizeText: true })) return false;
+    } else if (!text.includes(conditions.keyword as string)) return false;
   }
 
   // keyword_exact（完全一致）
   if (conditions.keyword_exact) {
     const rawText = payload.eventData?.text as string | undefined;
-    const text = (rawText || '').trim();
-    if (text !== conditions.keyword_exact) {
-      return false;
-    }
+    if (eventType === 'message_received' && typeof conditions.keyword_exact === 'string') {
+      if (!keywordMatches({ keyword: conditions.keyword_exact, match_type: 'exact' }, rawText || '', { normalizeText: true })) return false;
+    } else if ((rawText || '').trim() !== conditions.keyword_exact) return false;
   }
 
   return true;
@@ -244,6 +273,7 @@ async function executeAction(
   payload: EventPayload,
   lineAccessToken?: string,
   lineAccountId?: string | null,
+  dispatch: TagAutomationDispatch = createTagAutomationDispatch(),
 ): Promise<void> {
   const friendId = payload.friendId;
   if (!friendId && action.type !== 'send_webhook') {
@@ -251,9 +281,15 @@ async function executeAction(
   }
 
   switch (action.type) {
-    case 'add_tag':
-      await addTagToFriend(db, friendId!, action.params.tagId);
+    case 'add_tag': {
+      // Dynamic import avoids introducing a static event-bus ↔ tag-helper cycle.
+      const { attachTagAndFireSideEffects } = await import('./friend-tag-attach.js');
+      await attachTagAndFireSideEffects(db, friendId!, action.params.tagId, undefined, {
+        lineAccountId,
+        dispatch,
+      });
       break;
+    }
 
     case 'remove_tag':
       await removeTagFromFriend(db, friendId!, action.params.tagId);
@@ -264,7 +300,7 @@ async function executeAction(
       break;
 
     case 'send_message': {
-      if (!lineAccessToken || !friendId) break;
+      if (!lineAccessToken || !friendId) throw new Error('LINE account credentials are unavailable for this action');
       const friend = await db
         .prepare('SELECT line_user_id FROM friends WHERE id = ?')
         .bind(friendId)
@@ -358,7 +394,7 @@ async function executeAction(
     }
 
     case 'switch_rich_menu': {
-      if (!lineAccessToken || !friendId) break;
+      if (!lineAccessToken || !friendId) throw new Error('LINE account credentials are unavailable for this action');
       const friend = await db
         .prepare('SELECT line_user_id FROM friends WHERE id = ?')
         .bind(friendId)
@@ -370,7 +406,7 @@ async function executeAction(
     }
 
     case 'remove_rich_menu': {
-      if (!lineAccessToken || !friendId) break;
+      if (!lineAccessToken || !friendId) throw new Error('LINE account credentials are unavailable for this action');
       const friend = await db
         .prepare('SELECT line_user_id FROM friends WHERE id = ?')
         .bind(friendId)
