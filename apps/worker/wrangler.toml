@@ -55,12 +55,16 @@ class_name = "TenantScheduler"
 tag = "v1"
 new_sqlite_classes = ["TenantScheduler"]
 
-# Cron Trigger は引き続き残す。DO alarm と共存させる (自己ホスト環境が
-# cron のみで運用を続けられるようにするため)。両方が同じ分に発火しても、
-# scheduled() が呼ぶジョブ本体は元々 (6時間境界で2 trigger が同時に鳴る
-# 現行構成のもと) 同時実行に耐える楽観ロック/claim パターンで書かれている。
+# 注(渡邊環境、2026-09-23): 分足 cron "* * * * *" は削除した。DO alarm
+# (tenant-scheduler.ts の nextMinuteBoundary) が独立に毎分自己再アームする
+# ため、分足 cron と合わせると同じ scheduled() ジョブが毎分2回走っていた
+# (wrangler tail実測で確認: cron側cpuTime=10ms, DO alarm側cpuTime=8ms と
+# 無料枠10msの上限ぎりぎりで、これがCloudflareのCPU時間超過警告[24時間で
+# 100回以上]の一因)。DO alarmだけで分足ジョブは維持されるので機能は落ちない。
+# upstream 側の「cronのみでも運用できるように」という設計意図(下記, 自己
+# ホスト環境向け)は変えていない — 6時間足 cron は引き続き残す。
 [triggers]
-crons = ["* * * * *", "0 */6 * * *"]
+crons = ["0 */6 * * *"]
 
 # ═══════════════════════════════════════════════════════════════
 # Phase 5 self-update vars — consumed by /admin/update/*. Secrets
