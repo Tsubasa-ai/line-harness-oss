@@ -3,6 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+routes = [
+  { pattern = "lh-api.hogaraka-works.com", custom_domain = true },
+]
 
 # ═══════════════════════════════════════════════════════════════
 # デフォルト = テスト環境
@@ -86,7 +89,7 @@ WORKER_PUBLIC_URL = "https://line-harness.handrice-english2020.workers.dev"
 ADMIN_PUBLIC_URL = "https://line-harness-admin-89381092.pages.dev"
 LIFF_PUBLIC_URL = "https://line-harness-liff.pages.dev"
 CF_ACCOUNT_ID = "f9f9f11a505fbd65798a73f2b25278dd"
-ADMIN_ORIGIN = "https://line-harness-admin-89381092.pages.dev"
+ADMIN_ORIGIN = "https://lh-admin.hogaraka-works.com,https://line-harness-admin-89381092.pages.dev"
 ADMIN_ALLOW_CROSS_SITE = "true"
 
 # ═══════════════════════════════════════════════════════════════
