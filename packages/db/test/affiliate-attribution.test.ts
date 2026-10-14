@@ -357,9 +357,8 @@ describe('trackConversion + attribution integration', () => {
   let sqlite: Database.Database;
   let db: D1Database;
 
-  // trackConversion resolves attribution against the real clock; pin it to NOW so
-  // the fixed-date touches don't age out of the 90-day window.
   beforeEach(() => {
+    // Keep the conversion clock aligned with the fixed attribution fixtures.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(NOW));
     sqlite = setupDb();
@@ -374,6 +373,7 @@ describe('trackConversion + attribution integration', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    sqlite.close();
   });
 
   test('trackConversion stamps affiliate_id + attributed_ref_code from last-touch', async () => {
