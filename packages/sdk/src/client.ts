@@ -53,7 +53,7 @@ export class LineHarness {
     this.tags = new TagsResource(http)
     this.scenarios = new ScenariosResource(http, this.defaultAccountId)
     this.broadcasts = new BroadcastsResource(http, this.defaultAccountId)
-    this.richMenus = new RichMenusResource(http)
+    this.richMenus = new RichMenusResource(http, this.defaultAccountId)
     this.trackedLinks = new TrackedLinksResource(http)
     this.forms = new FormsResource(http)
     this.adPlatforms = new AdPlatformsResource(http)

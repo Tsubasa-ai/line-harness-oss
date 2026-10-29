@@ -9,21 +9,22 @@ export function registerManageRichMenus(server: McpServer): void {
     {
       action: z.enum(["list", "delete", "set_default"]).describe("Action to perform"),
       richMenuId: z.string().optional().describe("Rich menu ID (required for delete, set_default)"),
+      accountId: z.string().optional().describe("LINE account internal UUID. Required when several accounts are active (otherwise the default token is used and LINE returns 401)"),
     },
-    async ({ action, richMenuId }) => {
+    async ({ action, richMenuId, accountId }) => {
       try {
         const client = getClient();
         if (action === "list") {
-          const menus = await client.richMenus.list();
+          const menus = await client.richMenus.list(accountId);
           return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, richMenus: menus }, null, 2) }] };
         }
         if (!richMenuId) throw new Error("richMenuId is required for this action");
         if (action === "delete") {
-          await client.richMenus.delete(richMenuId);
+          await client.richMenus.delete(richMenuId, accountId);
           return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, deleted: richMenuId }, null, 2) }] };
         }
         if (action === "set_default") {
-          await client.richMenus.setDefault(richMenuId);
+          await client.richMenus.setDefault(richMenuId, accountId);
           return { content: [{ type: "text" as const, text: JSON.stringify({ success: true, defaultRichMenuId: richMenuId }, null, 2) }] };
         }
         throw new Error(`Unknown action: ${action}`);

@@ -46,8 +46,12 @@ export function registerCreateRichMenu(server: McpServer): void {
         .boolean()
         .default(false)
         .describe("Set this as the default rich menu for all friends"),
+      accountId: z
+        .string()
+        .optional()
+        .describe("LINE account internal UUID. Required when several accounts are active (otherwise the default token is used and LINE returns 401)"),
     },
-    async ({ name, chatBarText, size, selected, areas, imageData, imageContentType, setAsDefault }) => {
+    async ({ name, chatBarText, size, selected, areas, imageData, imageContentType, setAsDefault, accountId }) => {
       try {
         const client = getClient();
         const menu = await client.richMenus.create({
@@ -56,14 +60,14 @@ export function registerCreateRichMenu(server: McpServer): void {
           size,
           selected,
           areas: JSON.parse(areas),
-        });
+        }, accountId);
 
         if (imageData) {
-          await client.richMenus.uploadImage(menu.richMenuId, imageData, imageContentType);
+          await client.richMenus.uploadImage(menu.richMenuId, imageData, imageContentType, accountId);
         }
 
         if (setAsDefault) {
-          await client.richMenus.setDefault(menu.richMenuId);
+          await client.richMenus.setDefault(menu.richMenuId, accountId);
         }
 
         return {
